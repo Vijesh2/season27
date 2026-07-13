@@ -1,0 +1,1 @@
+"""Season team roster domain."""

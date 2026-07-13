@@ -1,0 +1,16 @@
+DEVELOPMENT_PLAN.md
+LEARNINGS.md
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+node_modules/
+app/static/app.js
+season27.db
+.env
+.sesskey

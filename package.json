@@ -1,0 +1,13 @@
+{
+  "name": "season27-frontend",
+  "private": true,
+  "scripts": {
+    "build": "esbuild frontend/app.ts --bundle --minify --outfile=app/static/app.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}
+

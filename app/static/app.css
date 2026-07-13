@@ -1,0 +1,59 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: #17221b;
+  background: #eef3ed;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+.container { width: min(760px, calc(100% - 2rem)); margin: 4rem auto; }
+.eyebrow, .label { color: #54705d; font-size: .8rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+h1 { font-size: clamp(2rem, 7vw, 4rem); letter-spacing: -.05em; margin: .25rem 0 2rem; }
+h2 { margin-top: 0; }
+.status-card, .section-card { background: #fff; border: 1px solid #d6e1d8; border-radius: 1rem; box-shadow: 0 8px 30px rgb(28 62 37 / 7%); margin: 1rem 0; padding: 1.5rem; }
+.status-card { background: #173f28; color: white; }
+.status-card .label, .server-time { color: #bcd5c4; }
+.phase { font-size: clamp(1.7rem, 5vw, 2.5rem); font-weight: 800; margin: .35rem 0; }
+.server-time { margin-bottom: 0; }
+ul { list-style: none; margin: 0; padding: 0; }
+.window { border-top: 1px solid #e3eae4; display: grid; gap: .2rem; padding: 1rem 0; }
+.window:first-child { border-top: 0; }
+.window-name { font-weight: 700; }
+.window small { color: #607066; }
+.window.active { border-left: .3rem solid #3c9c5c; padding-left: .8rem; }
+.dev-banner { background: #fff3c4; border: 1px solid #e6c95c; border-radius: .5rem; padding: .75rem 1rem; }
+footer { padding: 1rem 0; }
+a { color: #27683d; }
+.account-bar { align-items: center; display: flex; gap: 1rem; justify-content: flex-end; margin-bottom: 2rem; }
+.account-bar p { margin: 0 auto 0 0; }
+.account-bar form { margin: 0; }
+.link-button { background: transparent; border: 0; color: #27683d; cursor: pointer; font: inherit; padding: 0; text-decoration: underline; }
+.login-container { max-width: 440px; }
+.login-form { display: grid; gap: .65rem; }
+.login-form label { font-weight: 700; }
+.login-form input { border: 1px solid #aab9ae; border-radius: .5rem; font: inherit; font-size: 1.5rem; letter-spacing: .25em; padding: .75rem; text-transform: uppercase; }
+.login-form button { background: #173f28; border: 0; border-radius: .5rem; color: white; cursor: pointer; font: inherit; font-weight: 700; margin-top: .5rem; padding: .85rem; }
+.error { background: #fee9e7; border: 1px solid #e2aaa5; border-radius: .5rem; color: #82251e; padding: .75rem; }
+.brand-lockup { align-items: center; display: flex; gap: .8rem; margin-bottom: 1.5rem; }
+.brand-logo { height: 4rem; width: 4rem; }
+.brand-name { font-size: 1.65rem; font-weight: 850; letter-spacing: -.04em; }
+.header-brand { align-items: center; display: flex; font-weight: 850; gap: .45rem; margin-right: auto; text-decoration: none; }
+.header-brand img { height: 2.25rem; width: 2.25rem; }
+.account-bar > p { margin-left: 0; }
+.roster-status { color: #27683d; font-weight: 800; }
+.team-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem 1rem; }
+.team-row { align-items: center; border-top: 1px solid #e3eae4; display: flex; gap: .7rem; padding: .65rem 0; }
+.team-number { align-items: center; background: #e6f1e8; border-radius: 50%; display: inline-flex; flex: 0 0 1.8rem; font-size: .75rem; font-weight: 800; height: 1.8rem; justify-content: center; }
+.admin-team-list { columns: 2; margin: 1rem 0; }
+.admin-team-list li { break-inside: avoid; padding: .3rem 0; }
+.success { background: #e6f5e9; border: 1px solid #a7d4b0; border-radius: .5rem; color: #245c31; padding: .75rem; }
+
+@media (max-width: 520px) {
+  .container { margin: 2rem auto; }
+  .status-card, .section-card { border-radius: .75rem; padding: 1.1rem; }
+  .account-bar { align-items: flex-start; flex-wrap: wrap; }
+  .account-bar > p { flex-basis: 100%; order: 2; }
+  .team-list { grid-template-columns: 1fr; }
+  .admin-team-list { columns: 1; }
+}
