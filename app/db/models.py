@@ -180,5 +180,44 @@ class Swap(Base):
     second_position: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     swap_window: Mapped[SwapWindow] = relationship()
+    player: Mapped[Player] = relationship()
     first_team: Mapped[Team] = relationship(foreign_keys=[first_team_id])
     second_team: Mapped[Team] = relationship(foreign_keys=[second_team_id])
+
+
+class StandingsSnapshot(Base):
+    __tablename__ = "standings_snapshots"
+    __table_args__ = (UniqueConstraint("season_id", "version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"))
+    version: Mapped[int] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String(30))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    is_final: Mapped[bool] = mapped_column(Boolean, default=False)
+    rows: Mapped[list["Standing"]] = relationship(
+        back_populates="snapshot",
+        order_by="Standing.position",
+        cascade="all, delete-orphan",
+    )
+
+
+class Standing(Base):
+    __tablename__ = "standings"
+    __table_args__ = (
+        UniqueConstraint("snapshot_id", "team_id"),
+        UniqueConstraint("snapshot_id", "position"),
+        CheckConstraint("position >= 1 AND position <= 20", name="ck_standings_position"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    snapshot_id: Mapped[int] = mapped_column(
+        ForeignKey("standings_snapshots.id", ondelete="CASCADE")
+    )
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="RESTRICT"))
+    position: Mapped[int] = mapped_column(Integer)
+    played: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    points: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    goal_difference: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    snapshot: Mapped[StandingsSnapshot] = relationship(back_populates="rows")
+    team: Mapped[Team] = relationship()

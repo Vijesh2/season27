@@ -46,6 +46,21 @@ def get_swaps(session: Session, player_id: int, season_id: int) -> list[Swap]:
     return list(session.scalars(statement))
 
 
+def get_shared_swaps(session: Session, season_id: int) -> list[Swap]:
+    statement = (
+        select(Swap)
+        .options(
+            selectinload(Swap.player),
+            selectinload(Swap.swap_window),
+            selectinload(Swap.first_team),
+            selectinload(Swap.second_team),
+        )
+        .where(Swap.season_id == season_id)
+        .order_by(Swap.created_at.desc(), Swap.id.desc())
+    )
+    return list(session.scalars(statement))
+
+
 def preview_swap(team_ids: list[int], first_team_id: int, second_team_id: int) -> list[int]:
     if first_team_id == second_team_id:
         raise InvalidSwap("Select two different teams.")

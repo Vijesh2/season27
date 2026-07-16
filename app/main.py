@@ -27,10 +27,17 @@ from fasthtml.common import (
     Script,
     Small,
     Span,
+    Table,
+    Tbody,
+    Td,
+    Th,
+    Thead,
     Title,
+    Tr,
     Ul,
     to_xml,
 )
+from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.staticfiles import StaticFiles
@@ -48,6 +55,7 @@ from app.clock import Clock, clock_from_iso
 from app.config import Settings
 from app.db.models import AppSession, Prediction, Season, Swap
 from app.db.session import create_database_engine, create_schema, session_factory
+from app.leaderboard.service import build_leaderboard, find_entry
 from app.predictions.service import (
     InvalidPrediction,
     editing_is_open,
@@ -61,10 +69,12 @@ from app.predictions.service import (
     submit_prediction,
 )
 from app.seasons import calculate_phase, get_current_season, london, seed_development_season
+from app.standings.service import get_latest_snapshot, seed_development_snapshot
 from app.swaps.service import (
     InvalidSwap,
     active_swap_window,
     apply_swap,
+    get_shared_swaps,
     get_swaps,
     validate_swap,
 )
@@ -106,6 +116,8 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
         season = seed_development_season(session)
         seed_development_players(session, clock())
         seed_fixed_teams(session, season)
+        if settings.environment == "development":
+            seed_development_snapshot(session, season.id, clock())
 
     app = FastHTML()
     app.mount("/static", StaticFiles(directory=settings.static_dir), name="static")
@@ -285,6 +297,9 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
                         ),
                         P(f"Signed in as {app_session.player.display_name}"),
                         A("My prediction", href="/prediction"),
+                        A("Leaderboard", href="/leaderboard")
+                        if prediction_status and prediction_status.locked_at
+                        else None,
                         admin_link,
                         Form(
                             Input(type="hidden", name="csrf_token", value=app_session.csrf_token),
@@ -315,6 +330,14 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
                         cls="section-card",
                     ),
                     Div(H2("Swap windows"), Ul(*windows), cls="section-card"),
+                    Div(
+                        H2("Season results"),
+                        A("View leaderboard", href="/leaderboard"),
+                        A("Swap activity", href="/activity", cls="card-link"),
+                        cls="section-card",
+                    )
+                    if prediction_status and prediction_status.locked_at
+                    else None,
                     Div(
                         H2("Season teams"),
                         Ul(
@@ -674,6 +697,178 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
             except InvalidSwap as error:
                 return HTMLResponse(str(error), status_code=422)
         return RedirectResponse("/swaps?applied=1", status_code=303)
+
+    def game_access(
+        session: Session, player_id: int, season: Season, now: datetime
+    ) -> Response | None:
+        process_deadline(session, season, now)
+        if now < london(season.prediction_locks_at):
+            return HTMLResponse("Predictions remain private until the deadline.", status_code=403)
+        status = get_status(session, player_id, season.id)
+        if status is None or status.locked_at is None or status.excluded_at is not None:
+            return HTMLResponse("This season is unavailable for this player.", status_code=403)
+        return None
+
+    @app.get("/leaderboard")
+    def leaderboard_page(request: Request) -> Response:
+        app_session = current_session(request)
+        if app_session is None:
+            return redirect_to_login()
+        with sessions() as session:
+            season = get_current_season(session)
+            if season is None:
+                return HTMLResponse("No season configured", status_code=409)
+            denied = game_access(session, app_session.player_id, season, clock())
+            if denied:
+                return denied
+            snapshot = get_latest_snapshot(session, season.id)
+            if snapshot is None:
+                return page(
+                    Main(
+                        A("← Back to dashboard", href="/"),
+                        H1("Leaderboard"),
+                        P("Standings are not available yet.", cls="notice"),
+                        cls="container",
+                    ),
+                    title="Leaderboard · Season27",
+                )
+            entries = build_leaderboard(session, season.id, snapshot)
+            state_label = "Final" if snapshot.is_final else "As it stands"
+            return page(
+                Main(
+                    A("← Back to dashboard", href="/"),
+                    H1("Leaderboard"),
+                    P(state_label, cls="result-state"),
+                    P(f"Standings recorded: {format_time(snapshot.recorded_at)}"),
+                    Table(
+                        Thead(
+                            Tr(
+                                Th("Rank", scope="col"),
+                                Th("Player", scope="col"),
+                                Th("Score", scope="col"),
+                                Th("Exact", scope="col"),
+                                Th("Worst error", scope="col"),
+                            )
+                        ),
+                        Tbody(
+                            *(
+                                Tr(
+                                    Td(str(entry.score.rank)),
+                                    Td(
+                                        A(
+                                            entry.player.display_name,
+                                            href=f"/leaderboard/{entry.player.id}",
+                                        )
+                                    ),
+                                    Td(str(entry.score.total)),
+                                    Td(str(entry.score.exact_count)),
+                                    Td(str(entry.score.largest_error)),
+                                )
+                                for entry in entries
+                            )
+                        ),
+                        cls="results-table",
+                    ),
+                    A("View shared swap activity", href="/activity"),
+                    cls="container",
+                ),
+                title="Leaderboard · Season27",
+            )
+
+    @app.get("/leaderboard/{player_id}")
+    def player_score_page(request: Request, player_id: int) -> Response:
+        app_session = current_session(request)
+        if app_session is None:
+            return redirect_to_login()
+        with sessions() as session:
+            season = get_current_season(session)
+            if season is None:
+                return HTMLResponse("No season configured", status_code=409)
+            denied = game_access(session, app_session.player_id, season, clock())
+            if denied:
+                return denied
+            snapshot = get_latest_snapshot(session, season.id)
+            if snapshot is None:
+                return HTMLResponse("Standings are not available yet.", status_code=404)
+            entry = find_entry(build_leaderboard(session, season.id, snapshot), player_id)
+            if entry is None:
+                return HTMLResponse("Player not found", status_code=404)
+            teams = {row.team_id: row.team for row in snapshot.rows}
+            return page(
+                Main(
+                    A("← Back to leaderboard", href="/leaderboard"),
+                    H1(f"{entry.player.display_name}'s prediction"),
+                    P("Final" if snapshot.is_final else "As it stands", cls="result-state"),
+                    P(
+                        f"Score {entry.score.total} · {entry.score.exact_count} exact · "
+                        f"rank {entry.score.rank}"
+                    ),
+                    Table(
+                        Thead(
+                            Tr(
+                                Th("Team", scope="col"),
+                                Th("Predicted", scope="col"),
+                                Th("Actual", scope="col"),
+                                Th("Penalty", scope="col"),
+                            )
+                        ),
+                        Tbody(
+                            *(
+                                Tr(
+                                    Td(teams[item.team_id].name),
+                                    Td(str(item.predicted_position)),
+                                    Td(str(item.actual_position)),
+                                    Td("Exact" if item.exact else str(item.penalty)),
+                                )
+                                for item in entry.score.breakdown
+                            )
+                        ),
+                        cls="results-table",
+                    ),
+                    cls="container",
+                ),
+                title=f"{entry.player.display_name} · Season27",
+            )
+
+    @app.get("/activity")
+    def activity_page(request: Request) -> Response:
+        app_session = current_session(request)
+        if app_session is None:
+            return redirect_to_login()
+        with sessions() as session:
+            season = get_current_season(session)
+            if season is None:
+                return HTMLResponse("No season configured", status_code=409)
+            denied = game_access(session, app_session.player_id, season, clock())
+            if denied:
+                return denied
+            swaps = get_shared_swaps(session, season.id)
+            return page(
+                Main(
+                    A("← Back to leaderboard", href="/leaderboard"),
+                    H1("Swap activity"),
+                    Ul(
+                        *(
+                            Li(
+                                Span(item.player.display_name, cls="window-name"),
+                                Span(
+                                    f"swapped {item.first_team.name} and "
+                                    f"{item.second_team.name} in window "
+                                    f"{item.swap_window.sequence_number}"
+                                ),
+                                Small(format_time(item.created_at)),
+                                cls="swap-history-row",
+                            )
+                            for item in swaps
+                        ),
+                        cls="swap-history",
+                    )
+                    if swaps
+                    else P("No swaps have been made yet."),
+                    cls="container",
+                ),
+                title="Swap activity · Season27",
+            )
 
     @app.get("/prediction/review")
     def prediction_review(request: Request) -> Response:

@@ -3,6 +3,7 @@ from app.clock import clock_from_iso
 from app.config import Settings
 from app.db.session import create_database_engine, create_schema, session_factory
 from app.seasons import seed_development_season
+from app.standings.service import seed_development_snapshot
 from app.teams.service import seed_fixed_teams
 
 
@@ -14,6 +15,7 @@ def main() -> None:
         season = seed_development_season(session)
         players = seed_development_players(session, clock_from_iso(settings.dev_now)())
         team_count = len(seed_fixed_teams(session, season))
+        seed_development_snapshot(session, season.id, clock_from_iso(settings.dev_now)())
     print(
         f"Season {season.name}, {len(players)} development players, "
         f"and {team_count} teams are ready."
