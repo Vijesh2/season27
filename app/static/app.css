@@ -22,6 +22,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .window-name { font-weight: 700; }
 .window small { color: #607066; }
 .window.active { border-left: .3rem solid #3c9c5c; padding-left: .8rem; }
+.window-state { color: #27683d; font-size: .8rem; font-weight: 800; text-transform: uppercase; }
 .dev-banner { background: #fff3c4; border: 1px solid #e6c95c; border-radius: .5rem; padding: .75rem 1rem; }
 footer { padding: 1rem 0; }
 a { color: #27683d; }
@@ -41,19 +42,40 @@ a { color: #27683d; }
 .header-brand { align-items: center; display: flex; font-weight: 850; gap: .45rem; margin-right: auto; text-decoration: none; }
 .header-brand img { height: 2.25rem; width: 2.25rem; }
 .account-bar > p { margin-left: 0; }
-.roster-status { color: #27683d; font-weight: 800; }
-.team-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem 1rem; }
+.team-list { display: grid; grid-template-columns: 1fr; }
 .team-row { align-items: center; border-top: 1px solid #e3eae4; display: flex; gap: .7rem; padding: .65rem 0; }
 .team-number { align-items: center; background: #e6f1e8; border-radius: 50%; display: inline-flex; flex: 0 0 1.8rem; font-size: .75rem; font-weight: 800; height: 1.8rem; justify-content: center; }
-.admin-team-list { columns: 2; margin: 1rem 0; }
-.admin-team-list li { break-inside: avoid; padding: .3rem 0; }
 .success { background: #e6f5e9; border: 1px solid #a7d4b0; border-radius: .5rem; color: #245c31; padding: .75rem; }
+.prediction-list { display: grid; margin: 1.5rem 0; }
+.prediction-row { align-items: center; background: white; border: 1px solid #d6e1d8; border-bottom: 0; display: grid; gap: .75rem; grid-template-columns: 1.5rem 2.2rem 1fr 2.5rem 2.5rem; padding: .65rem .8rem; }
+.prediction-row:first-child { border-radius: .7rem .7rem 0 0; }
+.prediction-row:last-child { border-bottom: 1px solid #d6e1d8; border-radius: 0 0 .7rem .7rem; }
+.prediction-position { font-weight: 850; text-align: center; }
+.prediction-team { font-weight: 650; }
+.drag-handle { color: #607066; cursor: grab; font-size: 1.1rem; text-align: center; touch-action: none; }
+.move-button { align-items: center; background: #e6f1e8; border: 0; border-radius: .4rem; color: #173f28; cursor: pointer; display: inline-flex; font-size: 1.1rem; height: 2.2rem; justify-content: center; }
+.move-button:disabled { cursor: not-allowed; opacity: .35; }
+.save-button { background: #173f28; border: 0; border-radius: .5rem; color: white; cursor: pointer; font: inherit; font-weight: 750; padding: .85rem 1.2rem; }
+.save-button:disabled { cursor: not-allowed; opacity: .5; }
+.unsaved { background: #fff3c4; border: 1px solid #e6c95c; border-radius: .5rem; padding: .75rem; }
+.notice { background: #edf0f6; border: 1px solid #c9d0dd; border-radius: .5rem; padding: .75rem; }
+.last-saved { color: #607066; font-size: .9rem; }
+.submission-status { color: #27683d; font-weight: 800; }
+.review-link { display: inline-block; font-weight: 750; margin-left: 1rem; }
+.submit-form { display: grid; gap: 1rem; margin: 1.5rem 0; }
+.visually-hidden { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0 0 0 0); white-space: nowrap; }
+.swap-team-list { display: grid; margin: 1rem 0; }
+.swap-team-row { border-top: 1px solid #e3eae4; }
+.swap-team-row:first-child { border-top: 0; }
+.swap-team-row label { align-items: center; cursor: pointer; display: grid; gap: .75rem; grid-template-columns: 1.25rem 2rem 1fr; padding: .65rem 0; }
+.swap-team-row input { height: 1.1rem; width: 1.1rem; }
+.swap-preview p { margin: .5rem 0; }
+.swap-history-row { border-top: 1px solid #e3eae4; display: grid; gap: .25rem; padding: .8rem 0; }
+.swap-history-row:first-child { border-top: 0; }
 
 @media (max-width: 520px) {
   .container { margin: 2rem auto; }
   .status-card, .section-card { border-radius: .75rem; padding: 1.1rem; }
   .account-bar { align-items: flex-start; flex-wrap: wrap; }
   .account-bar > p { flex-basis: 100%; order: 2; }
-  .team-list { grid-template-columns: 1fr; }
-  .admin-team-list { columns: 1; }
 }

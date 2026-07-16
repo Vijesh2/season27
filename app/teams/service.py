@@ -1,18 +1,9 @@
 from dataclasses import dataclass
-from datetime import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth.service import audit
 from app.db.models import Season, SeasonTeam, Team
-from app.seasons import london
-
-ROSTER_SOURCE = (
-    "Premier League 2026/27 official membership announcement, 5 June 2026 — "
-    "https://www.premierleague.com/en/news/4673099/"
-    "the-202627-premier-league-season-officially-starts"
-)
 
 
 @dataclass(frozen=True)
@@ -23,13 +14,7 @@ class TeamData:
     source_identity: str
 
 
-@dataclass(frozen=True)
-class ValidationResult:
-    valid: bool
-    errors: tuple[str, ...]
-
-
-OFFICIAL_2026_27_TEAMS = (
+FIXED_2026_27_TEAMS = (
     TeamData("AFC Bournemouth", "Bournemouth", "afc-bournemouth", "afc-bournemouth"),
     TeamData("Arsenal", "Arsenal", "arsenal", "arsenal"),
     TeamData("Aston Villa", "Aston Villa", "aston-villa", "aston-villa"),
@@ -53,7 +38,7 @@ OFFICIAL_2026_27_TEAMS = (
 )
 
 
-def validate_roster(teams: tuple[TeamData, ...] | list[TeamData]) -> ValidationResult:
+def validate_fixed_teams(teams: tuple[TeamData, ...] | list[TeamData]) -> None:
     errors: list[str] = []
     if len(teams) != 20:
         errors.append("The roster must contain exactly 20 teams.")
@@ -62,24 +47,16 @@ def validate_roster(teams: tuple[TeamData, ...] | list[TeamData]) -> ValidationR
         values = [getattr(team, attribute).casefold() for team in teams]
         if len(values) != len(set(values)):
             errors.append(f"The roster contains duplicate {label}.")
-    return ValidationResult(not errors, tuple(errors))
+    if errors:
+        raise ValueError(" ".join(errors))
 
 
-def import_roster(
-    session: Session,
-    season: Season,
-    teams: tuple[TeamData, ...] | list[TeamData],
-    now: datetime,
-    source: str = ROSTER_SOURCE,
-) -> ValidationResult:
-    validation = validate_roster(teams)
-    if not validation.valid:
-        return validation
-    if season.roster_approved_at is not None or now >= london(season.game_opens_at):
-        return ValidationResult(False, ("The roster is already approved or locked.",))
-
-    session.execute(delete(SeasonTeam).where(SeasonTeam.season_id == season.id))
-    for order, item in enumerate(teams, start=1):
+def seed_fixed_teams(session: Session, season: Season) -> list[SeasonTeam]:
+    existing = get_season_teams(session, season.id)
+    if existing:
+        return existing
+    validate_fixed_teams(FIXED_2026_27_TEAMS)
+    for order, item in enumerate(FIXED_2026_27_TEAMS, start=1):
         team = session.scalar(select(Team).where(Team.source_identity == item.source_identity))
         if team is None:
             team = Team(
@@ -91,14 +68,11 @@ def import_roster(
             session.add(team)
             session.flush()
         session.add(SeasonTeam(season_id=season.id, team_id=team.id, display_order=order))
-    season.roster_source = source
-    season.roster_imported_at = now
-    audit(session, "team_roster_imported", now, metadata={"season_id": season.id, "count": 20})
     session.commit()
-    return validation
+    return get_season_teams(session, season.id)
 
 
-def get_roster(session: Session, season_id: int) -> list[SeasonTeam]:
+def get_season_teams(session: Session, season_id: int) -> list[SeasonTeam]:
     statement = (
         select(SeasonTeam)
         .options(selectinload(SeasonTeam.team))
@@ -106,27 +80,3 @@ def get_roster(session: Session, season_id: int) -> list[SeasonTeam]:
         .order_by(SeasonTeam.display_order)
     )
     return list(session.scalars(statement))
-
-
-def approve_roster(session: Session, season: Season, admin_player_id: int, now: datetime) -> bool:
-    if season.roster_approved_at is not None:
-        return True
-    if now >= london(season.game_opens_at):
-        return False
-    roster = get_roster(session, season.id)
-    data = [
-        TeamData(item.team.name, item.team.short_name, item.team.slug, item.team.source_identity)
-        for item in roster
-    ]
-    if not validate_roster(data).valid:
-        return False
-    season.roster_approved_at = now
-    audit(
-        session,
-        "team_roster_approved",
-        now,
-        admin_player_id,
-        {"season_id": season.id, "count": 20},
-    )
-    session.commit()
-    return True

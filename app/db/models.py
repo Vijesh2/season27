@@ -1,6 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -17,13 +26,6 @@ class Season(Base):
     game_opens_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     prediction_locks_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), default="scheduled")
-    roster_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    roster_imported_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    roster_approved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
     swap_windows: Mapped[list["SwapWindow"]] = relationship(
         back_populates="season", order_by="SwapWindow.sequence_number"
     )
@@ -116,3 +118,67 @@ class SeasonTeam(Base):
     display_order: Mapped[int] = mapped_column(Integer)
     season: Mapped[Season] = relationship()
     team: Mapped[Team] = relationship()
+
+
+class Prediction(Base):
+    __tablename__ = "predictions"
+    __table_args__ = (
+        UniqueConstraint("player_id", "season_id", "team_id"),
+        UniqueConstraint("player_id", "season_id", "predicted_position"),
+        CheckConstraint(
+            "predicted_position >= 1 AND predicted_position <= 20",
+            name="ck_predictions_position",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"))
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"))
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="RESTRICT"))
+    predicted_position: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    team: Mapped[Team] = relationship()
+
+
+class PredictionStatus(Base):
+    __tablename__ = "prediction_statuses"
+    __table_args__ = (UniqueConstraint("player_id", "season_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"))
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    submitted_order: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    excluded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PredictionSnapshot(Base):
+    __tablename__ = "prediction_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"))
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"))
+    snapshot_type: Mapped[str] = mapped_column(String(30))
+    prediction_data: Mapped[list[dict[str, int]]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Swap(Base):
+    __tablename__ = "swaps"
+    __table_args__ = (UniqueConstraint("player_id", "season_id", "swap_window_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"))
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"))
+    swap_window_id: Mapped[int] = mapped_column(
+        ForeignKey("swap_windows.id", ondelete="RESTRICT")
+    )
+    first_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="RESTRICT"))
+    second_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="RESTRICT"))
+    first_position: Mapped[int] = mapped_column(Integer)
+    second_position: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    swap_window: Mapped[SwapWindow] = relationship()
+    first_team: Mapped[Team] = relationship(foreign_keys=[first_team_id])
+    second_team: Mapped[Team] = relationship(foreign_keys=[second_team_id])

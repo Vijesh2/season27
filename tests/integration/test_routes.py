@@ -38,7 +38,6 @@ def test_dashboard_shows_seeded_season_after_login(client: TestClient) -> None:
     assert ">Admin<" in response.text
     assert "Season27" in response.text
     assert "Coventry City" in response.text
-    assert "Awaiting approval" in response.text
     assert "/static/brand/favicon-32.png" in response.text
 
 
@@ -86,31 +85,7 @@ def test_admin_authorization(client: TestClient) -> None:
     response = client.get("/admin")
     assert response.status_code == 200
     assert "Season27 administration" in response.text
-    assert "Approve roster" in response.text
     assert 'href="/"' in response.text
-
-
-def test_admin_can_approve_roster(client: TestClient) -> None:
-    login(client, ADMIN.code)
-    admin_page = client.get("/admin")
-    csrf = re.search(r'name="csrf_token" value="([^"]+)', admin_page.text)
-    assert csrf is not None
-    response = client.post(
-        "/admin/roster/approve",
-        data={"csrf_token": csrf.group(1)},
-        follow_redirects=False,
-    )
-    assert response.status_code == 303
-    assert "Status: Approved" in client.get("/admin").text
-    assert "Approved" in client.get("/").text
-
-
-def test_roster_approval_requires_admin_and_csrf(client: TestClient) -> None:
-    login(client, REGULAR.code)
-    assert client.post("/admin/roster/approve", data={"csrf_token": "x"}).status_code == 403
-    client.cookies.clear()
-    login(client, ADMIN.code)
-    assert client.post("/admin/roster/approve", data={"csrf_token": "bad"}).status_code == 403
 
 
 def test_logout_revokes_current_session(client: TestClient) -> None:

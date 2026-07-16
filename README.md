@@ -13,10 +13,9 @@ uv run season27
 
 Open <http://127.0.0.1:5001>.
 
-The development seed creates five generic local-only accounts and imports the confirmed 20-club
-2026/27 roster. The administrator can review and approve it from `/admin`; approval is permanent
-and unavailable once the game opens. No real player identities or login codes belong in the
-repository; configure those securely outside version control.
+The development seed creates five generic local-only accounts and loads the fixed 20-club 2026/27
+team list. No real player identities or login codes belong in the repository; configure those
+securely outside version control.
 
 To preview another game phase, provide a London local time or an ISO timestamp with an offset:
 
