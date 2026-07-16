@@ -10,6 +10,44 @@ from app.config import Settings
 from app.db.models import Standing, StandingsSnapshot
 from app.main import create_app
 from app.standings.service import StandingInput, create_snapshot, get_latest_snapshot
+from app.standings.source import ExternalStanding, SourceTable, StandingsSourceError
+from app.teams.service import FIXED_2026_27_TEAMS
+
+
+class FailingSource:
+    name = "test"
+
+    def fetch(self) -> SourceTable:
+        raise StandingsSourceError("private source implementation detail")
+
+
+class FixedSource:
+    name = "test"
+
+    def __init__(self, table: SourceTable) -> None:
+        self.table = table
+        self.calls = 0
+
+    def fetch(self) -> SourceTable:
+        self.calls += 1
+        return self.table
+
+
+def reversed_source_table() -> SourceTable:
+    return SourceTable(
+        rows=tuple(
+            ExternalStanding(
+                identity=team.source_identity,
+                name=team.name,
+                position=20 - index,
+                played=12,
+                points=index,
+                goal_difference=index - 10,
+            )
+            for index, team in enumerate(FIXED_2026_27_TEAMS)
+        ),
+        is_final=False,
+    )
 
 
 def login(client: TestClient, code: str) -> None:
@@ -117,7 +155,10 @@ def test_results_require_authentication_and_excluded_players_lose_access(
 
 def test_empty_standings_state_is_clear(database_url: str) -> None:
     submit_players(database_url, (1,))
-    app = create_app(Settings(database_url=database_url, dev_now="2026-09-01T12:00:00"))
+    app = create_app(
+        Settings(database_url=database_url, dev_now="2026-09-01T12:00:00"),
+        standings_source=FailingSource(),
+    )
     with app.state.session_factory() as session:
         session.execute(delete(Standing))
         session.execute(delete(StandingsSnapshot))
@@ -126,7 +167,61 @@ def test_empty_standings_state_is_clear(database_url: str) -> None:
         login(client, development_player_seeds()[1].code)
         page = client.get("/leaderboard")
         assert page.status_code == 200
-        assert "Standings are not available yet" in page.text
+        assert "No valid standings are available yet" in page.text
+        assert "private source" not in page.text
+
+
+def test_explicit_refresh_updates_then_throttles_and_requires_csrf(database_url: str) -> None:
+    submit_players(database_url, (1,))
+    now = datetime(2026, 9, 1, 12, tzinfo=LONDON)
+    source = FixedSource(reversed_source_table())
+    settings = Settings(database_url=database_url, dev_now=now.isoformat())
+    app = create_app(settings, standings_source=source)
+    with app.state.session_factory() as session:
+        snapshot = get_latest_snapshot(session, 1)
+        assert snapshot is not None
+        snapshot.refreshed_at = now
+        session.commit()
+    with TestClient(app) as client:
+        login(client, development_player_seeds()[1].code)
+        page = client.get("/leaderboard")
+        csrf = re.search(r'name="csrf_token" value="([^"]+)', page.text)
+        assert csrf
+        assert client.post("/standings/refresh", data={"csrf_token": "bad"}).status_code == 403
+        refreshed = client.post(
+            "/standings/refresh",
+            data={"csrf_token": csrf.group(1)},
+            follow_redirects=False,
+        )
+        assert refreshed.status_code == 303
+        assert refreshed.headers["location"].endswith("refresh=updated")
+        feedback = client.get(refreshed.headers["location"])
+        assert "Standings refreshed and scores updated" in feedback.text
+        throttled = client.post(
+            "/standings/refresh",
+            data={"csrf_token": csrf.group(1)},
+            follow_redirects=False,
+        )
+        assert throttled.headers["location"].endswith("refresh=throttled")
+    assert source.calls == 1
+
+
+def test_failed_refresh_shows_stale_warning_and_admin_incident(database_url: str) -> None:
+    submit_players(database_url, (0, 1))
+    app = create_app(
+        Settings(database_url=database_url, dev_now="2026-09-01T12:00:00"),
+        standings_source=FailingSource(),
+    )
+    with TestClient(app) as client:
+        login(client, development_player_seeds()[1].code)
+        page = client.get("/leaderboard")
+        assert page.status_code == 200
+        assert "Standings may be out of date" in page.text
+        assert "private source" not in page.text
+        client.cookies.clear()
+        login(client, development_player_seeds()[0].code)
+        admin = client.get("/admin")
+        assert "Standings source requires attention" in admin.text
 
 
 def test_shared_activity_shows_other_players_swaps(database_url: str) -> None:

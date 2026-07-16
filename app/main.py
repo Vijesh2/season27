@@ -50,6 +50,7 @@ from app.auth.service import (
     logout,
     resolve_session,
     seed_development_players,
+    throttle_key,
 )
 from app.clock import Clock, clock_from_iso
 from app.config import Settings
@@ -69,7 +70,19 @@ from app.predictions.service import (
     submit_prediction,
 )
 from app.seasons import calculate_phase, get_current_season, london, seed_development_season
-from app.standings.service import get_latest_snapshot, seed_development_snapshot
+from app.standings.refresh import (
+    RefreshOutcome,
+    get_refresh_state,
+    refresh_standings,
+    snapshot_is_stale,
+)
+from app.standings.service import seed_development_snapshot
+from app.standings.source import (
+    BBCStandingsSource,
+    DevelopmentStandingsSource,
+    ExternalStanding,
+    StandingsSource,
+)
 from app.swaps.service import (
     InvalidSwap,
     active_swap_window,
@@ -106,7 +119,11 @@ def page(*content: object, title: str = "Season 27", status_code: int = 200) -> 
     return HTMLResponse(to_xml(document), status_code=status_code)
 
 
-def create_app(settings: Settings | None = None, clock: Clock | None = None) -> FastHTML:
+def create_app(
+    settings: Settings | None = None,
+    clock: Clock | None = None,
+    standings_source: StandingsSource | None = None,
+) -> FastHTML:
     settings = settings or Settings()
     clock = clock or clock_from_iso(settings.dev_now)
     engine = create_database_engine(settings.database_url)
@@ -116,8 +133,27 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
         season = seed_development_season(session)
         seed_development_players(session, clock())
         seed_fixed_teams(session, season)
-        if settings.environment == "development":
-            seed_development_snapshot(session, season.id, clock())
+        if settings.environment == "development" and standings_source is None:
+            snapshot = seed_development_snapshot(session, season.id, clock())
+            standings_source = DevelopmentStandingsSource(
+                tuple(
+                    ExternalStanding(
+                        identity=row.team.source_identity,
+                        name=row.team.name,
+                        position=row.position,
+                        played=row.played or 0,
+                        points=row.points or 0,
+                        goal_difference=row.goal_difference or 0,
+                    )
+                    for row in snapshot.rows
+                )
+            )
+    if standings_source is None:
+        standings_source = BBCStandingsSource(
+            settings.standings_url,
+            settings.standings_connect_timeout_seconds,
+            settings.standings_read_timeout_seconds,
+        )
 
     app = FastHTML()
     app.mount("/static", StaticFiles(directory=settings.static_dir), name="static")
@@ -721,13 +757,44 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
             denied = game_access(session, app_session.player_id, season, clock())
             if denied:
                 return denied
-            snapshot = get_latest_snapshot(session, season.id)
+            now = clock()
+            refresh_result = refresh_standings(
+                session, season, standings_source, now, settings
+            )
+            snapshot = refresh_result.snapshot
+            refresh_state = get_refresh_state(session, season.id)
+            stale = snapshot_is_stale(snapshot, refresh_state, now, settings)
+            feedback_key = request.query_params.get("refresh")
+            feedback_messages = {
+                RefreshOutcome.UPDATED.value: "Standings refreshed and scores updated.",
+                RefreshOutcome.UNCHANGED.value: "Standings checked; the table has not changed.",
+                RefreshOutcome.THROTTLED.value: "Please wait before refreshing standings again.",
+                RefreshOutcome.FAILED.value: (
+                    "Standings could not be refreshed; showing the last valid table."
+                ),
+                RefreshOutcome.CACHED.value: "Standings are already up to date.",
+            }
+            feedback = feedback_messages.get(feedback_key) if feedback_key else None
             if snapshot is None:
                 return page(
                     Main(
                         A("← Back to dashboard", href="/"),
                         H1("Leaderboard"),
-                        P("Standings are not available yet.", cls="notice"),
+                        P(
+                            "No valid standings are available yet. Please try refreshing shortly.",
+                            cls="notice",
+                            role="status",
+                        ),
+                        Form(
+                            Input(
+                                type="hidden",
+                                name="csrf_token",
+                                value=app_session.csrf_token,
+                            ),
+                            Button("Refresh standings", type="submit", cls="save-button"),
+                            method="post",
+                            action="/standings/refresh",
+                        ),
                         cls="container",
                     ),
                     title="Leaderboard · Season27",
@@ -738,8 +805,24 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
                 Main(
                     A("← Back to dashboard", href="/"),
                     H1("Leaderboard"),
+                    P(feedback, cls="success", role="status") if feedback else None,
+                    P(
+                        "Standings may be out of date. Scores use the last valid table.",
+                        cls="error",
+                        role="alert",
+                    )
+                    if stale
+                    else None,
                     P(state_label, cls="result-state"),
                     P(f"Standings recorded: {format_time(snapshot.recorded_at)}"),
+                    P(f"Last checked: {format_time(snapshot.refreshed_at)}"),
+                    Form(
+                        Input(type="hidden", name="csrf_token", value=app_session.csrf_token),
+                        Button("Refresh standings", type="submit", cls="save-button"),
+                        method="post",
+                        action="/standings/refresh",
+                        cls="standings-refresh",
+                    ),
                     Table(
                         Thead(
                             Tr(
@@ -787,7 +870,10 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
             denied = game_access(session, app_session.player_id, season, clock())
             if denied:
                 return denied
-            snapshot = get_latest_snapshot(session, season.id)
+            refresh_result = refresh_standings(
+                session, season, standings_source, clock(), settings
+            )
+            snapshot = refresh_result.snapshot
             if snapshot is None:
                 return HTMLResponse("Standings are not available yet.", status_code=404)
             entry = find_entry(build_leaderboard(session, season.id, snapshot), player_id)
@@ -829,6 +915,38 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
                 ),
                 title=f"{entry.player.display_name} · Season27",
             )
+
+    @app.post("/standings/refresh")
+    async def standings_refresh(request: Request) -> Response:
+        app_session = current_session(request)
+        if app_session is None:
+            return redirect_to_login()
+        form = await request.form()
+        if not hmac.compare_digest(str(form.get("csrf_token", "")), app_session.csrf_token):
+            return HTMLResponse("Request rejected", status_code=403)
+        with sessions() as session:
+            season = get_current_season(session)
+            if season is None:
+                return HTMLResponse("No season configured", status_code=409)
+            now = clock()
+            denied = game_access(session, app_session.player_id, season, now)
+            if denied:
+                return denied
+            ip = request.client.host if request.client else "unknown"
+            keys = (
+                throttle_key(settings, "standings-session", app_session.token_hash),
+                throttle_key(settings, "standings-ip", ip),
+            )
+            result = refresh_standings(
+                session,
+                season,
+                standings_source,
+                now,
+                settings,
+                force=True,
+                throttle_keys=keys,
+            )
+        return RedirectResponse(f"/leaderboard?refresh={result.outcome}", status_code=303)
 
     @app.get("/activity")
     def activity_page(request: Request) -> Response:
@@ -1017,10 +1135,20 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
                 title="Forbidden · Season 27",
                 status_code=403,
             )
+        with sessions() as session:
+            season = get_current_season(session)
+            refresh_state = get_refresh_state(session, season.id) if season else None
         return page(
             Main(
                 A("← Back to dashboard", href="/"),
                 H1("Season27 administration"),
+                P(
+                    "Standings source requires attention. Players are seeing the last valid table.",
+                    cls="error",
+                    role="alert",
+                )
+                if refresh_state and refresh_state.incident_open
+                else None,
                 P("Admin tools arrive in a later checkpoint."),
                 cls="container",
             ),

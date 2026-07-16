@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     session_days: int = 300
     login_attempt_limit: int = 5
     login_lock_minutes: int = 15
+    standings_url: str = "https://www.bbc.co.uk/sport/football/premier-league/table"
+    standings_cache_minutes: int = 15
+    standings_stale_minutes: int = 30
+    standings_refresh_throttle_seconds: int = 60
+    standings_connect_timeout_seconds: float = 3.0
+    standings_read_timeout_seconds: float = 8.0
     static_dir: Path = Path(__file__).parent / "static"
 
     @property

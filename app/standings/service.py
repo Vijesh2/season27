@@ -53,6 +53,7 @@ def create_snapshot(
         version=(latest_version or 0) + 1,
         source=source,
         recorded_at=recorded_at,
+        refreshed_at=recorded_at,
         is_final=is_final,
     )
     snapshot.rows = [

@@ -194,6 +194,7 @@ class StandingsSnapshot(Base):
     version: Mapped[int] = mapped_column(Integer)
     source: Mapped[str] = mapped_column(String(30))
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    refreshed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     is_final: Mapped[bool] = mapped_column(Boolean, default=False)
     rows: Mapped[list["Standing"]] = relationship(
         back_populates="snapshot",
@@ -221,3 +222,23 @@ class Standing(Base):
     goal_difference: Mapped[int | None] = mapped_column(Integer, nullable=True)
     snapshot: Mapped[StandingsSnapshot] = relationship(back_populates="rows")
     team: Mapped[Team] = relationship()
+
+
+class StandingsRefreshState(Base):
+    __tablename__ = "standings_refresh_states"
+    __table_args__ = (UniqueConstraint("season_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"))
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    incident_open: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class StandingsRefreshThrottle(Base):
+    __tablename__ = "standings_refresh_throttles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

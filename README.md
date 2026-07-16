@@ -38,3 +38,9 @@ npm run build
 
 The app creates and seeds its local SQLite database on first start. Alembic is configured for
 versioned production schema changes; run `uv run alembic upgrade head` against a fresh database.
+
+Production uses the BBC Premier League table as its standings source. Ordinary leaderboard visits
+reuse standings checked within the previous 15 minutes; the authenticated refresh control requests
+a throttled cache bypass. If the source is unavailable or invalid, Season27 retains the last valid
+snapshot and displays a stale-data warning. Source URL, cache duration, refresh throttle, and network
+timeouts can be configured through `SEASON27_STANDINGS_*` environment variables.
