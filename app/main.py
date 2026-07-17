@@ -42,7 +42,7 @@ from fasthtml.common import (
     Ul,
     to_xml,
 )
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -66,12 +66,13 @@ from app.auth.service import (
     LOGIN_CSRF_COOKIE,
     SESSION_COOKIE,
     authenticate,
+    bootstrap_admin,
     logout,
     resolve_session,
     seed_development_players,
     throttle_key,
 )
-from app.clock import Clock, clock_from_iso
+from app.clock import Clock, MutableClock, clock_from_iso
 from app.config import Settings
 from app.db.models import (
     AppSession,
@@ -126,7 +127,12 @@ def format_time(value: datetime) -> str:
     return london(value).strftime("%d %B %Y, %H:%M %Z")
 
 
-def page(*content: object, title: str = "Season 27", status_code: int = 200) -> HTMLResponse:
+def _page(
+    *content: object,
+    title: str = "Season 27",
+    status_code: int = 200,
+    environment: str | None = None,
+) -> HTMLResponse:
     document = Html(
         Head(
             Meta(charset="utf-8"),
@@ -142,7 +148,17 @@ def page(*content: object, title: str = "Season 27", status_code: int = 200) -> 
             Link(rel="apple-touch-icon", href="/static/brand/apple-touch-icon.png"),
             Script(src="/static/app.js", defer=True),
         ),
-        Body(*content),
+        Body(
+            Div(
+                f"{environment.upper()} ENVIRONMENT — NOT LIVE",
+                cls="environment-banner",
+                role="status",
+            )
+            if environment in {"staging", "test"}
+            else None,
+            *content,
+        ),
+        lang="en",
     )
     return HTMLResponse(to_xml(document), status_code=status_code)
 
@@ -159,7 +175,15 @@ def create_app(
     create_schema(engine)
     with sessions() as session:
         season = seed_development_season(session)
-        seed_development_players(session, clock())
+        if settings.environment in {"development", "test", "staging"}:
+            seed_development_players(session, clock())
+        elif settings.bootstrap_admin_name and settings.bootstrap_admin_code:
+            bootstrap_admin(
+                session,
+                settings.bootstrap_admin_name,
+                settings.bootstrap_admin_code.get_secret_value(),
+                clock(),
+            )
         seed_fixed_teams(session, season)
         if settings.environment == "development" and standings_source is None:
             snapshot = seed_development_snapshot(session, season.id, clock())
@@ -185,6 +209,31 @@ def create_app(
 
     app = FastHTML()
     app.mount("/static", StaticFiles(directory=settings.static_dir), name="static")
+
+    if settings.environment == "test" and isinstance(clock, MutableClock):
+
+        @app.post("/__test__/clock")
+        async def set_test_clock(request: Request) -> JSONResponse:
+            expected = settings.test_control_token
+            supplied = request.headers.get("x-season27-test-token", "")
+            if expected is None or not hmac.compare_digest(expected.get_secret_value(), supplied):
+                return JSONResponse({"status": "forbidden"}, status_code=403)
+            payload = await request.json()
+            try:
+                clock.set(datetime.fromisoformat(str(payload["now"])))
+            except (KeyError, TypeError, ValueError):
+                return JSONResponse({"status": "invalid"}, status_code=400)
+            return JSONResponse({"status": "ok", "now": clock().isoformat()})
+
+    def page(
+        *content: object, title: str = "Season 27", status_code: int = 200
+    ) -> HTMLResponse:
+        return _page(
+            *content,
+            title=title,
+            status_code=status_code,
+            environment=settings.environment,
+        )
 
     def current_session(request: Request) -> AppSession | None:
         with sessions() as session:
@@ -451,9 +500,12 @@ def create_app(
             rows = tuple(
                 Li(
                     Input(type="hidden", name="team_id", value=item.team_id),
-                    Span("↕", cls="drag-handle", aria_hidden="true"),
                     Span(str(item.predicted_position), cls="prediction-position"),
-                    Span(item.team.name, cls="prediction-team"),
+                    Span(
+                        item.team.name,
+                        cls="prediction-team drag-handle" if editable else "prediction-team",
+                        title="Press and hold to reorder" if editable else None,
+                    ),
                     Button(
                         "↑",
                         type="submit",
@@ -524,6 +576,7 @@ def create_app(
                         method="post",
                         action="/prediction",
                         id="prediction-form",
+                        data_editable="true" if editable else "false",
                     ),
                     P(f"Last saved: {format_time(last_saved)}", cls="last-saved"),
                     P(f"Deadline: {format_time(season.prediction_locks_at)}"),
@@ -2069,14 +2122,25 @@ def create_app(
             title="Operational health · Season27",
         )
 
-    @app.get("/health")
-    def health() -> JSONResponse:
+    @app.get("/live")
+    def live() -> JSONResponse:
+        return JSONResponse({"status": "ok"})
+
+    def database_health() -> JSONResponse:
         try:
             with sessions() as session:
-                session.execute(select(1))
+                session.execute(text("SELECT 1"))
             return JSONResponse({"status": "ok"})
         except Exception:
             return JSONResponse({"status": "degraded"}, status_code=503)
+
+    @app.get("/ready")
+    def ready() -> JSONResponse:
+        return database_health()
+
+    @app.get("/health")
+    def health() -> JSONResponse:
+        return database_health()
 
     app.state.engine = engine
     app.state.session_factory = sessions
@@ -2087,4 +2151,10 @@ app = create_app()
 
 
 def run() -> None:
-    uvicorn.run("app.main:app", host="127.0.0.1", port=5001, reload=True)
+    settings = Settings()
+    uvicorn.run(
+        "app.main:app",
+        host=settings.host,
+        port=settings.port,
+        reload=settings.environment == "development",
+    )

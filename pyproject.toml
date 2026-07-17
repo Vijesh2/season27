@@ -28,6 +28,9 @@ dev = [
 [project.scripts]
 season27 = "app.main:run"
 season27-seed = "scripts.seed_development:main"
+season27-start = "scripts.start:main"
+season27-reset-staging = "scripts.reset_staging:main"
+season27-rehearsal = "scripts.rehearsal:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -39,6 +42,14 @@ packages = ["app", "scripts"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers --cov=app --cov=scripts --cov-report=term-missing --cov-fail-under=90"
+
+[tool.coverage.run]
+omit = [
+  "scripts/e2e_server.py",
+  "scripts/rehearsal.py",
+  "scripts/reset_staging.py",
+  "scripts/start.py",
+]
 
 [tool.ruff]
 line-length = 100

@@ -3,9 +3,13 @@
   "private": true,
   "scripts": {
     "build": "esbuild frontend/app.ts --bundle --minify --outfile=app/static/app.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.54.1",
     "@types/sortablejs": "^1.15.8",
     "esbuild": "^0.25.0",
     "sortablejs": "^1.15.6",

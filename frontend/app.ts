@@ -40,6 +40,7 @@ if (predictionForm) {
     Sortable.create(list, {
       animation: 140,
       handle: ".drag-handle",
+      disabled: predictionForm.dataset.editable !== "true",
       onEnd: (event) => {
         refreshRows();
         if (unsaved) unsaved.hidden = false;

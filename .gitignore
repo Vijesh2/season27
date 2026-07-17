@@ -12,5 +12,8 @@ dist/
 node_modules/
 app/static/app.js
 season27.db
+e2e.db
+playwright-report/
+test-results/
 .env
 .sesskey

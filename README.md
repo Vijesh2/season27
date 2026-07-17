@@ -34,7 +34,12 @@ uv run pytest
 npm install
 npm run typecheck
 npm run build
+npm run e2e
 ```
+
+Checkpoint 10 adds production packaging, CI, browser lifecycle/accessibility coverage, guarded
+staging rehearsal controls, and launch operations. See [deployment](docs/DEPLOYMENT.md),
+[staging rehearsal](docs/REHEARSAL.md), and the [launch checklist](docs/LAUNCH_CHECKLIST.md).
 
 The app creates and seeds its local SQLite database on first start. Alembic is configured for
 versioned production schema changes; run `uv run alembic upgrade head` against a fresh database.

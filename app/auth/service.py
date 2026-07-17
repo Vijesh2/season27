@@ -106,6 +106,28 @@ def seed_development_players(
     return players
 
 
+def bootstrap_admin(session: Session, name: str, code: str, now: datetime) -> Player:
+    """Create the first administrator without ever persisting the clear-text code."""
+    normalized = normalize_code(code)
+    if normalized is None:
+        raise ValueError("bootstrap administrator code must be four letters or digits")
+    existing = session.scalar(select(Player).order_by(Player.id).limit(1))
+    if existing is not None:
+        return existing
+    player = Player(
+        display_name=name.strip(),
+        login_code_hash=hasher.hash(normalized),
+        is_admin=True,
+        is_active=True,
+        failed_login_count=0,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(player)
+    session.commit()
+    return player
+
+
 def _throttle(session: Session, key_hash: str, now: datetime) -> LoginThrottle:
     throttle = session.scalar(select(LoginThrottle).where(LoginThrottle.key_hash == key_hash))
     if throttle is None:

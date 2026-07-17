@@ -67,7 +67,13 @@ def test_login_failure_is_generic_and_csrf_is_required(client: TestClient) -> No
 
 
 def test_session_cookie_security_attributes(database_url: str) -> None:
-    settings = Settings(database_url=database_url, environment="production")
+    settings = Settings(
+        database_url=database_url,
+        environment="production",
+        secret_key="a-production-strength-test-secret",
+        bootstrap_admin_name=ADMIN.display_name,
+        bootstrap_admin_code=ADMIN.code,
+    )
     with TestClient(create_app(settings), base_url="https://testserver") as secure_client:
         response = login(secure_client, ADMIN.code)
     cookie = response.headers["set-cookie"]

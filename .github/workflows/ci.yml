@@ -1,27 +1,31 @@
 name: CI
-
 on:
-  push:
   pull_request:
-
+  push:
+    branches: [main]
+permissions:
+  contents: read
 jobs:
-  checks:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: astral-sh/setup-uv@v6
-        with:
-          python-version: "3.12"
-          enable-cache: true
+        with: { enable-cache: true }
       - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-      - run: uv sync --locked
+        with: { node-version: 22, cache: npm }
+      - run: uv sync --frozen
       - run: npm ci
       - run: uv run ruff check .
       - run: uv run mypy
       - run: uv run pytest
       - run: npm run typecheck
       - run: npm run build
-
+      - run: npm audit --audit-level=high
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - name: Scan repository for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -35,12 +35,16 @@ def test_prediction_page_is_private_and_read_only_before_open(client: TestClient
     assert page.status_code == 200
     assert "Predictions are read-only" in page.text
     assert page.text.count('class="prediction-row"') == 20
+    assert 'class="prediction-team drag-handle"' not in page.text
+    assert 'data-editable="false"' in page.text
 
 
 def test_player_can_move_save_and_restore_draft(database_url: str) -> None:
     with editable_client(database_url) as client:
         login(client, development_player_seeds()[1].code)
         initial = client.get("/prediction")
+        assert initial.text.count('class="prediction-team drag-handle"') == 20
+        assert 'data-editable="true"' in initial.text
         csrf, ids = prediction_values(initial.text)
         moved = client.post(
             f"/prediction/move/{ids[0]}/down",
