@@ -1,5 +1,8 @@
+import csv
 import hmac
+import io
 import secrets
+from collections.abc import Sequence
 from datetime import datetime
 
 import uvicorn
@@ -23,8 +26,10 @@ from fasthtml.common import (
     Link,
     Main,
     Meta,
+    Option,
     P,
     Script,
+    Select,
     Small,
     Span,
     Table,
@@ -37,11 +42,25 @@ from fasthtml.common import (
     Ul,
     to_xml,
 )
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.staticfiles import StaticFiles
 
+from app.admin.service import (
+    InvalidAdminAction,
+    correct_prediction,
+    correct_standings,
+    reinstate_player,
+    reset_player_lock,
+    reverse_swap,
+    revoke_player_sessions,
+    revoke_session,
+    rotate_login_code,
+    update_player,
+    update_season_dates,
+)
 from app.auth.service import (
     GENERIC_LOGIN_ERROR,
     LOGIN_CSRF_COOKIE,
@@ -54,7 +73,16 @@ from app.auth.service import (
 )
 from app.clock import Clock, clock_from_iso
 from app.config import Settings
-from app.db.models import AppSession, Prediction, Season, Swap
+from app.db.models import (
+    AppSession,
+    AuditEvent,
+    Player,
+    Prediction,
+    PredictionStatus,
+    Season,
+    SeasonTeam,
+    Swap,
+)
 from app.db.session import create_database_engine, create_schema, session_factory
 from app.leaderboard.service import build_leaderboard, find_entry
 from app.predictions.service import (
@@ -76,7 +104,7 @@ from app.standings.refresh import (
     refresh_standings,
     snapshot_is_stale,
 )
-from app.standings.service import seed_development_snapshot
+from app.standings.service import get_latest_snapshot, seed_development_snapshot
 from app.standings.source import (
     BBCStandingsSource,
     DevelopmentStandingsSource,
@@ -1149,17 +1177,906 @@ def create_app(
                 )
                 if refresh_state and refresh_state.incident_open
                 else None,
-                P("Admin tools arrive in a later checkpoint."),
+                Div(
+                    H2("Security and players"),
+                    A("Manage players and login codes", href="/admin/players"),
+                    A("Manage sessions", href="/admin/sessions", cls="card-link"),
+                    cls="section-card",
+                ),
+                Div(
+                    H2("Game operations"),
+                    A("Season dates", href="/admin/season"),
+                    A("Corrections and reinstatement", href="/admin/game", cls="card-link"),
+                    cls="section-card",
+                ),
+                Div(
+                    H2("Records and operations"),
+                    A("Audit history", href="/admin/audit"),
+                    A("Exports", href="/admin/exports", cls="card-link"),
+                    A("Operational health", href="/admin/health", cls="card-link"),
+                    cls="section-card",
+                ),
                 cls="container",
             ),
             title="Administration · Season27",
         )
 
+    def admin_access(request: Request) -> tuple[AppSession | None, Response | None]:
+        app_session = current_session(request)
+        if app_session is None:
+            return None, redirect_to_login()
+        if not app_session.player.is_admin:
+            return None, HTMLResponse("Administrator access is required.", status_code=403)
+        return app_session, None
+
+    def admin_csrf(form: object, app_session: AppSession) -> bool:
+        value = form.get("csrf_token", "")  # type: ignore[attr-defined]
+        return hmac.compare_digest(str(value), app_session.csrf_token)
+
+    def parse_order(form: object) -> list[int]:
+        try:
+            values = form.getlist("team_id")  # type: ignore[attr-defined]
+            return [int(str(value)) for value in values]
+        except (TypeError, ValueError, AttributeError) as error:
+            raise InvalidAdminAction("Invalid team order.") from error
+
+    def team_order_form(
+        action: str,
+        csrf_token: str,
+        teams: Sequence[SeasonTeam],
+        current_ids: list[int],
+        submit_label: str,
+        *,
+        include_final: bool = False,
+    ) -> Form:
+        by_id = {item.team_id: item.team for item in teams}
+        return Form(
+            Input(type="hidden", name="csrf_token", value=csrf_token),
+            Ul(
+                *(
+                    Li(
+                        Label(f"Position {position}", fr=f"position-{position}"),
+                        Select(
+                            *(
+                                Option(
+                                    team.name,
+                                    value=team_id,
+                                    selected=team_id == selected_id,
+                                )
+                                for team_id, team in by_id.items()
+                            ),
+                            id=f"position-{position}",
+                            name="team_id",
+                        ),
+                        cls="admin-order-row",
+                    )
+                    for position, selected_id in enumerate(current_ids, start=1)
+                ),
+                cls="admin-order",
+            ),
+            Label(
+                Input(type="checkbox", name="is_final", value="yes"),
+                " Mark these standings as final",
+            )
+            if include_final
+            else None,
+            Label("Reason", fr="reason"),
+            Input(id="reason", name="reason", minlength="8", maxlength="500", required=True),
+            Button(submit_label, type="submit", cls="save-button"),
+            method="post",
+            action=action,
+            cls="admin-form",
+        )
+
+    @app.get("/admin/players")
+    def admin_players(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        with sessions() as session:
+            players = list(session.scalars(select(Player).order_by(Player.id)))
+        return page(
+            Main(
+                A("← Back to administration", href="/admin"),
+                H1("Players and login codes"),
+                P(
+                    "Generated codes are displayed once. Only their secure hashes are retained.",
+                    cls="notice",
+                ),
+                *(
+                    Div(
+                        H2(player.display_name),
+                        Form(
+                            Input(
+                                type="hidden",
+                                name="csrf_token",
+                                value=app_session.csrf_token,
+                            ),
+                            Label("Display name", fr=f"name-{player.id}"),
+                            Input(
+                                id=f"name-{player.id}",
+                                name="display_name",
+                                value=player.display_name,
+                                maxlength="80",
+                                required=True,
+                            ),
+                            Label(
+                                Input(
+                                    type="checkbox",
+                                    name="is_active",
+                                    value="yes",
+                                    checked=player.is_active,
+                                ),
+                                " Active player",
+                            ),
+                            Button("Save player", type="submit"),
+                            method="post",
+                            action=f"/admin/players/{player.id}/update",
+                            cls="admin-form",
+                        ),
+                        Form(
+                            Input(
+                                type="hidden",
+                                name="csrf_token",
+                                value=app_session.csrf_token,
+                            ),
+                            Button("Generate new login code", type="submit"),
+                            method="post",
+                            action=f"/admin/players/{player.id}/rotate-code",
+                            cls="inline-admin-form",
+                        ),
+                        Form(
+                            Input(
+                                type="hidden",
+                                name="csrf_token",
+                                value=app_session.csrf_token,
+                            ),
+                            Button("Clear login lock", type="submit"),
+                            method="post",
+                            action=f"/admin/players/{player.id}/unlock",
+                            cls="inline-admin-form",
+                        ),
+                        cls="section-card",
+                    )
+                    for player in players
+                ),
+                cls="container",
+            ),
+            title="Players · Season27",
+        )
+
+    @app.post("/admin/players/{player_id}/update")
+    async def admin_player_update(request: Request, player_id: int) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            with sessions() as session:
+                update_player(
+                    session,
+                    app_session.player_id,
+                    player_id,
+                    str(form.get("display_name", "")),
+                    form.get("is_active") == "yes",
+                    clock(),
+                )
+        except InvalidAdminAction as error:
+            return HTMLResponse(str(error), status_code=422)
+        return RedirectResponse("/admin/players", status_code=303)
+
+    @app.post("/admin/players/{player_id}/rotate-code")
+    async def admin_rotate_code(request: Request, player_id: int) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            with sessions() as session:
+                player = session.get(Player, player_id)
+                code = rotate_login_code(
+                    session, app_session.player_id, player_id, clock()
+                )
+                player_name = player.display_name if player else "player"
+        except InvalidAdminAction as error:
+            return HTMLResponse(str(error), status_code=422)
+        response = page(
+            Main(
+                H1("New login code"),
+                P(f"New code for {player_name}"),
+                P(code, cls="one-time-code"),
+                P("Copy and distribute this code now. It will not be shown again.", cls="notice"),
+                A("Return to players", href="/admin/players"),
+                cls="container login-container",
+            ),
+            title="New login code · Season27",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.post("/admin/players/{player_id}/unlock")
+    async def admin_unlock_player(request: Request, player_id: int) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            with sessions() as session:
+                reset_player_lock(session, app_session.player_id, player_id, clock())
+        except InvalidAdminAction as error:
+            return HTMLResponse(str(error), status_code=422)
+        return RedirectResponse("/admin/players", status_code=303)
+
+    @app.get("/admin/sessions")
+    def admin_sessions(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        with sessions() as session:
+            stored_sessions = list(
+                session.scalars(
+                    select(AppSession)
+                    .options(selectinload(AppSession.player))
+                    .order_by(AppSession.last_seen_at.desc())
+                )
+            )
+        return page(
+            Main(
+                A("← Back to administration", href="/admin"),
+                H1("Device sessions"),
+                *(
+                    Div(
+                        H2(item.player.display_name),
+                        P(f"Last seen {format_time(item.last_seen_at)}"),
+                        P("Revoked" if item.revoked_at else "Active"),
+                        Form(
+                            Input(
+                                type="hidden",
+                                name="csrf_token",
+                                value=app_session.csrf_token,
+                            ),
+                            Button(
+                                "Revoke this session",
+                                type="submit",
+                                disabled=bool(item.revoked_at),
+                            ),
+                            method="post",
+                            action=f"/admin/sessions/{item.id}/revoke",
+                        ),
+                        cls="section-card",
+                    )
+                    for item in stored_sessions
+                ),
+                *(
+                    Form(
+                        Input(
+                            type="hidden",
+                            name="csrf_token",
+                            value=app_session.csrf_token,
+                        ),
+                        Button(f"Revoke all sessions for {player.display_name}", type="submit"),
+                        method="post",
+                        action=f"/admin/players/{player.id}/revoke-sessions",
+                        cls="admin-form section-card",
+                    )
+                    for player in {item.player.id: item.player for item in stored_sessions}.values()
+                ),
+                cls="container",
+            ),
+            title="Sessions · Season27",
+        )
+
+    @app.post("/admin/sessions/{session_id}/revoke")
+    async def admin_revoke_session(request: Request, session_id: int) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            with sessions() as session:
+                revoke_session(session, app_session.player_id, session_id, clock())
+        except InvalidAdminAction as error:
+            return HTMLResponse(str(error), status_code=422)
+        return RedirectResponse("/admin/sessions", status_code=303)
+
+    @app.post("/admin/players/{player_id}/revoke-sessions")
+    async def admin_revoke_all_sessions(request: Request, player_id: int) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        with sessions() as session:
+            revoke_player_sessions(session, app_session.player_id, player_id, clock())
+        return RedirectResponse("/admin/sessions", status_code=303)
+
+    @app.get("/admin/season")
+    def admin_season(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        with sessions() as session:
+            season = get_current_season(session)
+            if season is None:
+                return HTMLResponse("No season configured", status_code=409)
+            return page(
+                Main(
+                    A("← Back to administration", href="/admin"),
+                    H1("Season dates"),
+                    P("Dates become immutable when predictions lock.", cls="notice"),
+                    Form(
+                        Input(
+                            type="hidden",
+                            name="csrf_token",
+                            value=app_session.csrf_token,
+                        ),
+                        Label("Game opens", fr="game-opens"),
+                        Input(
+                            id="game-opens",
+                            name="game_opens_at",
+                            type="datetime-local",
+                            value=london(season.game_opens_at).strftime("%Y-%m-%dT%H:%M"),
+                            required=True,
+                        ),
+                        Label("Predictions lock", fr="prediction-locks"),
+                        Input(
+                            id="prediction-locks",
+                            name="prediction_locks_at",
+                            type="datetime-local",
+                            value=london(season.prediction_locks_at).strftime("%Y-%m-%dT%H:%M"),
+                            required=True,
+                        ),
+                        Button("Save dates", type="submit", cls="save-button"),
+                        method="post",
+                        action="/admin/season",
+                        cls="admin-form",
+                    ),
+                    cls="container",
+                ),
+                title="Season dates · Season27",
+            )
+
+    @app.post("/admin/season")
+    async def admin_season_update(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            opens_at = datetime.fromisoformat(str(form.get("game_opens_at", "")))
+            locks_at = datetime.fromisoformat(str(form.get("prediction_locks_at", "")))
+            opens_at = london(opens_at)
+            locks_at = london(locks_at)
+            with sessions() as session:
+                season = get_current_season(session)
+                if season is None:
+                    return HTMLResponse("No season configured", status_code=409)
+                update_season_dates(
+                    session,
+                    app_session.player_id,
+                    season,
+                    opens_at,
+                    locks_at,
+                    clock(),
+                )
+        except (ValueError, InvalidAdminAction) as error:
+            return HTMLResponse(str(error), status_code=422)
+        return RedirectResponse("/admin/season", status_code=303)
+
+    @app.get("/admin/game")
+    def admin_game(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        with sessions() as session:
+            season = get_current_season(session)
+            if season is None:
+                return HTMLResponse("No season configured", status_code=409)
+            now = clock()
+            process_deadline(session, season, now)
+            players = list(session.scalars(select(Player).order_by(Player.id)))
+            statuses = {
+                status.player_id: status
+                for status in session.scalars(
+                    select(PredictionStatus).where(PredictionStatus.season_id == season.id)
+                )
+            }
+            swaps = get_shared_swaps(session, season.id)
+            snapshot = get_latest_snapshot(session, season.id)
+            reveal_open = now >= london(season.prediction_locks_at)
+            return page(
+                Main(
+                    A("← Back to administration", href="/admin"),
+                    H1("Game corrections"),
+                    P(
+                        "Prediction contents remain hidden until the deadline, including here.",
+                        cls="notice",
+                    )
+                    if not reveal_open
+                    else None,
+                    Div(
+                        H2("Players"),
+                        Ul(
+                            *(
+                                Li(
+                                    Span(player.display_name),
+                                    Span(
+                                        "Excluded"
+                                        if statuses.get(player.id)
+                                        and statuses[player.id].excluded_at
+                                        else "Locked"
+                                        if statuses.get(player.id)
+                                        and statuses[player.id].locked_at
+                                        else "Not locked"
+                                    ),
+                                    A("Open", href=f"/admin/game/player/{player.id}")
+                                    if reveal_open
+                                    else None,
+                                    cls="admin-summary-row",
+                                )
+                                for player in players
+                            )
+                        ),
+                        cls="section-card",
+                    ),
+                    Div(
+                        H2("Recorded swaps"),
+                        *(
+                            Div(
+                                P(
+                                    f"{swap.player.display_name}: {swap.first_team.name} / "
+                                    f"{swap.second_team.name}"
+                                ),
+                                P("Corrected" if swap.corrected_at else "Final"),
+                                Form(
+                                    Input(
+                                        type="hidden",
+                                        name="csrf_token",
+                                        value=app_session.csrf_token,
+                                    ),
+                                    Label("Reason", fr=f"swap-reason-{swap.id}"),
+                                    Input(
+                                        id=f"swap-reason-{swap.id}",
+                                        name="reason",
+                                        minlength="8",
+                                        maxlength="500",
+                                        required=True,
+                                    ),
+                                    Button(
+                                        "Reverse as correction",
+                                        type="submit",
+                                        disabled=bool(swap.corrected_at),
+                                    ),
+                                    method="post",
+                                    action=f"/admin/game/swap/{swap.id}/reverse",
+                                    cls="admin-form",
+                                ),
+                            )
+                            for swap in swaps
+                        )
+                        if reveal_open and swaps
+                        else P("No visible swaps."),
+                        cls="section-card",
+                    ),
+                    Div(
+                        H2("Standings"),
+                        A("Create a corrected standings version", href="/admin/game/standings")
+                        if snapshot
+                        else P("No standings snapshot is available."),
+                        cls="section-card",
+                    ),
+                    cls="container",
+                ),
+                title="Game corrections · Season27",
+            )
+
+    @app.get("/admin/game/player/{player_id}")
+    def admin_game_player(request: Request, player_id: int) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        with sessions() as session:
+            season = get_current_season(session)
+            player = session.get(Player, player_id)
+            if season is None or player is None:
+                return HTMLResponse("Player or season not found", status_code=404)
+            now = clock()
+            if now < london(season.prediction_locks_at):
+                return HTMLResponse(
+                    "Predictions remain private until the deadline.", status_code=403
+                )
+            process_deadline(session, season, now)
+            status = get_status(session, player_id, season.id)
+            teams = get_season_teams(session, season.id)
+            draft = get_draft(session, player_id, season.id)
+            current_ids = [item.team_id for item in draft] or [item.team_id for item in teams]
+            action = (
+                f"/admin/game/player/{player_id}/reinstate"
+                if status and status.excluded_at
+                else f"/admin/game/player/{player_id}/correct"
+            )
+            label = (
+                "Reinstate and lock prediction"
+                if status and status.excluded_at
+                else "Correct prediction"
+            )
+            return page(
+                Main(
+                    A("← Back to game corrections", href="/admin/game"),
+                    H1(player.display_name),
+                    P(
+                        "Reinstatement is exceptional and immediately locks the entered prediction."
+                        if status and status.excluded_at
+                        else "This creates immutable before-and-after correction snapshots."
+                    ),
+                    team_order_form(
+                        action,
+                        app_session.csrf_token,
+                        teams,
+                        current_ids,
+                        label,
+                    ),
+                    cls="container",
+                ),
+                title=f"Correct {player.display_name} · Season27",
+            )
+
+    async def player_order_action(
+        request: Request, player_id: int, *, reinstate: bool
+    ) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            team_ids = parse_order(form)
+            with sessions() as session:
+                season = get_current_season(session)
+                if season is None:
+                    return HTMLResponse("No season configured", status_code=409)
+                operation = reinstate_player if reinstate else correct_prediction
+                operation(
+                    session,
+                    app_session.player_id,
+                    player_id,
+                    season,
+                    team_ids,
+                    str(form.get("reason", "")),
+                    clock(),
+                )
+        except (InvalidAdminAction, InvalidPrediction) as error:
+            return HTMLResponse(str(error), status_code=422)
+        return RedirectResponse("/admin/game", status_code=303)
+
+    @app.post("/admin/game/player/{player_id}/reinstate")
+    async def admin_reinstate(request: Request, player_id: int) -> Response:
+        return await player_order_action(request, player_id, reinstate=True)
+
+    @app.post("/admin/game/player/{player_id}/correct")
+    async def admin_correct_prediction(request: Request, player_id: int) -> Response:
+        return await player_order_action(request, player_id, reinstate=False)
+
+    @app.post("/admin/game/swap/{swap_id}/reverse")
+    async def admin_reverse_swap(request: Request, swap_id: int) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            with sessions() as session:
+                reverse_swap(
+                    session,
+                    app_session.player_id,
+                    swap_id,
+                    str(form.get("reason", "")),
+                    clock(),
+                )
+        except InvalidAdminAction as error:
+            return HTMLResponse(str(error), status_code=422)
+        return RedirectResponse("/admin/game", status_code=303)
+
+    @app.get("/admin/game/standings")
+    def admin_standings_correction(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        with sessions() as session:
+            season = get_current_season(session)
+            if season is None:
+                return HTMLResponse("No season configured", status_code=409)
+            snapshot = get_latest_snapshot(session, season.id)
+            if snapshot is None:
+                return HTMLResponse("No standings available", status_code=404)
+            teams = get_season_teams(session, season.id)
+            return page(
+                Main(
+                    A("← Back to game corrections", href="/admin/game"),
+                    H1("Correct standings"),
+                    P("A correction creates a new immutable version."),
+                    team_order_form(
+                        "/admin/game/standings",
+                        app_session.csrf_token,
+                        teams,
+                        [row.team_id for row in snapshot.rows],
+                        "Create corrected standings",
+                        include_final=True,
+                    ),
+                    cls="container",
+                ),
+                title="Correct standings · Season27",
+            )
+
+    @app.post("/admin/game/standings")
+    async def admin_standings_update(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            with sessions() as session:
+                season = get_current_season(session)
+                if season is None:
+                    return HTMLResponse("No season configured", status_code=409)
+                snapshot = get_latest_snapshot(session, season.id)
+                if snapshot is None:
+                    return HTMLResponse("No standings available", status_code=404)
+                correct_standings(
+                    session,
+                    app_session.player_id,
+                    snapshot,
+                    parse_order(form),
+                    str(form.get("reason", "")),
+                    clock(),
+                    is_final=form.get("is_final") == "yes",
+                )
+        except (InvalidAdminAction, InvalidPrediction, KeyError) as error:
+            return HTMLResponse(str(error), status_code=422)
+        return RedirectResponse("/admin/game", status_code=303)
+
+    @app.get("/admin/audit")
+    def admin_audit(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        with sessions() as session:
+            events = list(
+                session.scalars(select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(250))
+            )
+            players = {
+                player.id: player.display_name for player in session.scalars(select(Player))
+            }
+        return page(
+            Main(
+                A("← Back to administration", href="/admin"),
+                H1("Audit history"),
+                P("The most recent 250 security and game events are shown."),
+                Table(
+                    Thead(
+                        Tr(
+                            Th("Time", scope="col"),
+                            Th("Actor", scope="col"),
+                            Th("Event", scope="col"),
+                            Th("Details", scope="col"),
+                        )
+                    ),
+                    Tbody(
+                        *(
+                            Tr(
+                                Td(format_time(event.created_at)),
+                                Td(
+                                    players.get(event.actor_player_id, "System")
+                                    if event.actor_player_id is not None
+                                    else "System"
+                                ),
+                                Td(event.event_type.replace("_", " ")),
+                                Td(str(event.event_metadata)),
+                            )
+                            for event in events
+                        )
+                    ),
+                    cls="results-table audit-table",
+                ),
+                cls="container wide-container",
+            ),
+            title="Audit history · Season27",
+        )
+
+    @app.get("/admin/exports")
+    def admin_exports(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        return page(
+            Main(
+                A("← Back to administration", href="/admin"),
+                H1("Data exports"),
+                P(
+                    "Prediction and score exports remain unavailable until predictions are public.",
+                    cls="notice",
+                ),
+                *(
+                    Div(
+                        H2(kind.title()),
+                        A("CSV", href=f"/admin/export/{kind}/csv"),
+                        A("JSON", href=f"/admin/export/{kind}/json", cls="card-link"),
+                        cls="section-card",
+                    )
+                    for kind in ("predictions", "swaps", "standings", "scores")
+                ),
+                cls="container",
+            ),
+            title="Exports · Season27",
+        )
+
+    def export_rows(
+        session: Session, kind: str, season: Season, now: datetime
+    ) -> list[dict[str, object]]:
+        sensitive = {"predictions", "swaps", "scores"}
+        if kind in sensitive and now < london(season.prediction_locks_at):
+            raise InvalidAdminAction("This export is unavailable before predictions are public.")
+        if kind == "predictions":
+            players = {
+                player.id: player.display_name for player in session.scalars(select(Player))
+            }
+            predictions = session.scalars(
+                select(Prediction)
+                .join(
+                    PredictionStatus,
+                    (PredictionStatus.player_id == Prediction.player_id)
+                    & (PredictionStatus.season_id == Prediction.season_id),
+                )
+                .options(selectinload(Prediction.team))
+                .where(
+                    Prediction.season_id == season.id,
+                    PredictionStatus.locked_at.is_not(None),
+                    PredictionStatus.excluded_at.is_(None),
+                )
+                .order_by(Prediction.player_id, Prediction.predicted_position)
+            )
+            return [
+                {
+                    "player": players[item.player_id],
+                    "position": item.predicted_position,
+                    "team": item.team.name,
+                }
+                for item in predictions
+            ]
+        if kind == "swaps":
+            return [
+                {
+                    "player": item.player.display_name,
+                    "window": item.swap_window.sequence_number,
+                    "first_team": item.first_team.name,
+                    "second_team": item.second_team.name,
+                    "created_at": london(item.created_at).isoformat(),
+                    "corrected": item.corrected_at is not None,
+                }
+                for item in get_shared_swaps(session, season.id)
+            ]
+        snapshot = get_latest_snapshot(session, season.id)
+        if kind == "standings":
+            if snapshot is None:
+                return []
+            return [
+                {
+                    "version": snapshot.version,
+                    "position": row.position,
+                    "team": row.team.name,
+                    "played": row.played,
+                    "points": row.points,
+                    "goal_difference": row.goal_difference,
+                    "is_final": snapshot.is_final,
+                }
+                for row in snapshot.rows
+            ]
+        if kind == "scores":
+            if snapshot is None:
+                return []
+            return [
+                {
+                    "rank": entry.score.rank,
+                    "player": entry.player.display_name,
+                    "score": entry.score.total,
+                    "exact": entry.score.exact_count,
+                    "worst_error": entry.score.largest_error,
+                }
+                for entry in build_leaderboard(session, season.id, snapshot)
+            ]
+        raise InvalidAdminAction("Unknown export type.")
+
+    @app.get("/admin/export/{kind}/{format_name}")
+    def admin_export(request: Request, kind: str, format_name: str) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        try:
+            with sessions() as session:
+                season = get_current_season(session)
+                if season is None:
+                    return HTMLResponse("No season configured", status_code=409)
+                rows = export_rows(session, kind, season, clock())
+        except InvalidAdminAction as error:
+            return HTMLResponse(str(error), status_code=422)
+        if format_name == "json":
+            json_response = JSONResponse(rows)
+            json_response.headers["Content-Disposition"] = (
+                f'attachment; filename="season27-{kind}.json"'
+            )
+            return json_response
+        if format_name == "csv":
+            output = io.StringIO()
+            if rows:
+                writer = csv.DictWriter(output, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+            csv_response = Response(output.getvalue(), media_type="text/csv")
+            csv_response.headers["Content-Disposition"] = (
+                f'attachment; filename="season27-{kind}.csv"'
+            )
+            return csv_response
+        return HTMLResponse("Unknown export format", status_code=404)
+
+    @app.get("/admin/health")
+    def admin_health(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        with sessions() as session:
+            season = get_current_season(session)
+            snapshot = get_latest_snapshot(session, season.id) if season else None
+            refresh_state = get_refresh_state(session, season.id) if season else None
+        return page(
+            Main(
+                A("← Back to administration", href="/admin"),
+                H1("Operational health"),
+                Div(
+                    P("Database", cls="label"),
+                    P("Connected", cls="success"),
+                    cls="section-card",
+                ),
+                Div(
+                    P("Standings", cls="label"),
+                    P(
+                        f"Version {snapshot.version}; checked {format_time(snapshot.refreshed_at)}"
+                        if snapshot
+                        else "No valid snapshot"
+                    ),
+                    P("Source incident open", cls="error")
+                    if refresh_state and refresh_state.incident_open
+                    else P("No unresolved source incident", cls="success"),
+                    cls="section-card",
+                ),
+                P(f"Environment: {settings.environment}"),
+                cls="container",
+            ),
+            title="Operational health · Season27",
+        )
+
     @app.get("/health")
     def health() -> JSONResponse:
-        with sessions() as session:
-            session.connection()
-        return JSONResponse({"status": "ok"})
+        try:
+            with sessions() as session:
+                session.execute(select(1))
+            return JSONResponse({"status": "ok"})
+        except Exception:
+            return JSONResponse({"status": "degraded"}, status_code=503)
 
     app.state.engine = engine
     app.state.session_factory = sessions

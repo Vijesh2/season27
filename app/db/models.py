@@ -68,7 +68,7 @@ class AppSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    player: Mapped[Player] = relationship()
+    player: Mapped[Player] = relationship(foreign_keys=[player_id])
 
 
 class LoginThrottle(Base):
@@ -179,8 +179,14 @@ class Swap(Base):
     first_position: Mapped[int] = mapped_column(Integer)
     second_position: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    corrected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    correction_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    corrected_by_player_id: Mapped[int | None] = mapped_column(
+        ForeignKey("players.id", ondelete="SET NULL"), nullable=True
+    )
     swap_window: Mapped[SwapWindow] = relationship()
-    player: Mapped[Player] = relationship()
+    player: Mapped[Player] = relationship(foreign_keys=[player_id])
+    corrected_by: Mapped[Player | None] = relationship(foreign_keys=[corrected_by_player_id])
     first_team: Mapped[Team] = relationship(foreign_keys=[first_team_id])
     second_team: Mapped[Team] = relationship(foreign_keys=[second_team_id])
 

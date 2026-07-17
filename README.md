@@ -44,3 +44,9 @@ reuse standings checked within the previous 15 minutes; the authenticated refres
 a throttled cache bypass. If the source is unavailable or invalid, Season27 retains the last valid
 snapshot and displays a stale-data warning. Source URL, cache duration, refresh throttle, and network
 timeouts can be configured through `SEASON27_STANDINGS_*` environment variables.
+
+The administrator uses the normal player login and can manage player display names, rotate login
+codes, revoke device sessions, adjust pre-lock dates, perform reasoned exceptional corrections,
+reinstate excluded players, inspect audit history, and export season data. Newly generated login
+codes are shown once, are never written to logs or exports, and revoke that player's existing
+sessions immediately.
