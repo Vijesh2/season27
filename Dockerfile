@@ -9,10 +9,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH"
 WORKDIR /app
 RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock README.md alembic.ini ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-install-project
 COPY app ./app
 COPY scripts ./scripts
 COPY migrations ./migrations
+RUN uv sync --frozen --no-dev
 COPY --from=frontend /build/app/static/app.js ./app/static/app.js
 EXPOSE 5001
 CMD ["uv", "run", "--no-sync", "season27-start"]
