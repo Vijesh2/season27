@@ -433,6 +433,47 @@ def create_app(
                         cls="status-card",
                     ),
                     Div(
+                        H2("How to play"),
+                        Ul(
+                            Li(
+                                Span("1", cls="team-number"),
+                                Div(
+                                    P("Predict the table", cls="how-to-title"),
+                                    P(
+                                        "Put all 20 teams in the order you think they will "
+                                        "finish, then submit before the deadline."
+                                    ),
+                                ),
+                                cls="how-to-step",
+                            ),
+                            Li(
+                                Span("2", cls="team-number"),
+                                Div(
+                                    P("Use your swaps", cls="how-to-title"),
+                                    P(
+                                        "In each swap window, exchange the positions of two teams "
+                                        "to update your prediction."
+                                    ),
+                                ),
+                                cls="how-to-step",
+                            ),
+                            Li(
+                                Span("3", cls="team-number"),
+                                Div(
+                                    P("Lowest score wins", cls="how-to-title"),
+                                    P(
+                                        "You score one point for every place each team finishes "
+                                        "away from your prediction."
+                                    ),
+                                ),
+                                cls="how-to-step",
+                            ),
+                            cls="how-to-list",
+                        ),
+                        A("Make or review your prediction", href="/prediction"),
+                        cls="section-card",
+                    ),
+                    Div(
                         H2("Prediction period"),
                         P(f"Opens {format_time(season.game_opens_at)}"),
                         P(f"Locks {format_time(season.prediction_locks_at)}"),

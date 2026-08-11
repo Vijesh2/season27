@@ -33,6 +33,11 @@ def test_dashboard_shows_seeded_season_after_login(client: TestClient) -> None:
     assert response.status_code == 200
     assert "Premier League 2026/27" in response.text
     assert "Prediction period" in response.text
+    assert "How to play" in response.text
+    assert "Predict the table" in response.text
+    assert "Use your swaps" in response.text
+    assert "Lowest score wins" in response.text
+    assert 'href="/prediction"' in response.text
     assert "Swap 4" in response.text
     assert f"Signed in as {ADMIN.display_name}" in response.text
     assert ">Admin<" in response.text
