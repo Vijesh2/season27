@@ -27,6 +27,21 @@ def test_dashboard_requires_authentication(client: TestClient) -> None:
     assert response.headers["location"] == "/login"
 
 
+def test_how_to_play_accordion_is_available_before_and_after_login(
+    client: TestClient,
+) -> None:
+    login_page = client.get("/login")
+    assert "<details" in login_page.text
+    assert "<summary>How to play</summary>" in login_page.text
+    assert "Predict the table" in login_page.text
+
+    assert login(client, ADMIN.code).status_code == 303
+    for path in ("/", "/prediction"):
+        page = client.get(path)
+        assert page.status_code == 200
+        assert page.text.count("<summary>How to play</summary>") == 1
+
+
 def test_dashboard_shows_seeded_season_after_login(client: TestClient) -> None:
     assert login(client, f" {ADMIN.code.lower()} ").status_code == 303
     response = client.get("/")

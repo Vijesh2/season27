@@ -46,6 +46,10 @@ a { color: #27683d; }
 .team-list { display: grid; grid-template-columns: 1fr; }
 .team-row { align-items: center; border-top: 1px solid #e3eae4; display: flex; gap: .7rem; padding: .65rem 0; }
 .team-number { align-items: center; background: #e6f1e8; border-radius: 50%; display: inline-flex; flex: 0 0 1.8rem; font-size: .75rem; font-weight: 800; height: 1.8rem; justify-content: center; }
+.how-to-card { background: #fff; border: 1px solid #d6e1d8; border-radius: .75rem; box-shadow: 0 8px 30px rgb(28 62 37 / 7%); margin: 1rem auto; width: min(760px, calc(100% - 2rem)); }
+.how-to-card summary { color: #27683d; cursor: pointer; font-weight: 800; padding: 1rem 1.25rem; }
+.how-to-card summary:focus-visible { outline: 3px solid #3c9c5c; outline-offset: 3px; }
+.how-to-content { border-top: 1px solid #e3eae4; padding: 1rem 1.25rem 1.25rem; }
 .how-to-list { margin-bottom: 1rem; }
 .how-to-step { align-items: flex-start; border-top: 1px solid #e3eae4; display: flex; gap: .8rem; padding: .85rem 0; }
 .how-to-step:first-child { border-top: 0; padding-top: 0; }

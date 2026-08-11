@@ -12,6 +12,7 @@ from fasthtml.common import (
     A,
     Body,
     Button,
+    Details,
     Div,
     FastHTML,
     Footer,
@@ -32,6 +33,7 @@ from fasthtml.common import (
     Select,
     Small,
     Span,
+    Summary,
     Table,
     Tbody,
     Td,
@@ -127,6 +129,53 @@ def format_time(value: datetime) -> str:
     return london(value).strftime("%d %B %Y, %H:%M %Z")
 
 
+def how_to_play() -> Details:
+    return Details(
+        Summary("How to play"),
+        Div(
+            Ul(
+                Li(
+                    Span("1", cls="team-number"),
+                    Div(
+                        P("Predict the table", cls="how-to-title"),
+                        P(
+                            "Put all 20 teams in the order you think they will finish, "
+                            "then submit before the deadline."
+                        ),
+                    ),
+                    cls="how-to-step",
+                ),
+                Li(
+                    Span("2", cls="team-number"),
+                    Div(
+                        P("Use your swaps", cls="how-to-title"),
+                        P(
+                            "In each swap window, exchange the positions of two teams "
+                            "to update your prediction."
+                        ),
+                    ),
+                    cls="how-to-step",
+                ),
+                Li(
+                    Span("3", cls="team-number"),
+                    Div(
+                        P("Lowest score wins", cls="how-to-title"),
+                        P(
+                            "You score one point for every place each team finishes "
+                            "away from your prediction."
+                        ),
+                    ),
+                    cls="how-to-step",
+                ),
+                cls="how-to-list",
+            ),
+            A("Make or review your prediction", href="/prediction"),
+            cls="how-to-content",
+        ),
+        cls="how-to-card",
+    )
+
+
 def _page(
     *content: object,
     title: str = "Season 27",
@@ -156,6 +205,7 @@ def _page(
             )
             if environment in {"staging", "test"}
             else None,
+            how_to_play(),
             *content,
         ),
         lang="en",
@@ -431,47 +481,6 @@ def create_app(
                         P(phase.label, cls="phase"),
                         P(f"Server time: {format_time(now)}", cls="server-time"),
                         cls="status-card",
-                    ),
-                    Div(
-                        H2("How to play"),
-                        Ul(
-                            Li(
-                                Span("1", cls="team-number"),
-                                Div(
-                                    P("Predict the table", cls="how-to-title"),
-                                    P(
-                                        "Put all 20 teams in the order you think they will "
-                                        "finish, then submit before the deadline."
-                                    ),
-                                ),
-                                cls="how-to-step",
-                            ),
-                            Li(
-                                Span("2", cls="team-number"),
-                                Div(
-                                    P("Use your swaps", cls="how-to-title"),
-                                    P(
-                                        "In each swap window, exchange the positions of two teams "
-                                        "to update your prediction."
-                                    ),
-                                ),
-                                cls="how-to-step",
-                            ),
-                            Li(
-                                Span("3", cls="team-number"),
-                                Div(
-                                    P("Lowest score wins", cls="how-to-title"),
-                                    P(
-                                        "You score one point for every place each team finishes "
-                                        "away from your prediction."
-                                    ),
-                                ),
-                                cls="how-to-step",
-                            ),
-                            cls="how-to-list",
-                        ),
-                        A("Make or review your prediction", href="/prediction"),
-                        cls="section-card",
                     ),
                     Div(
                         H2("Prediction period"),
