@@ -9,7 +9,8 @@ store.
 1. Create a service from this repository and attach a persistent volume mounted at `/data`.
 2. Set `SEASON27_ENVIRONMENT=production`, `SEASON27_SECRET_KEY` to a long random secret, and set
    `SEASON27_BOOTSTRAP_ADMIN_NAME` and `SEASON27_BOOTSTRAP_ADMIN_CODE` as Railway secret variables.
-   The code must contain exactly four letters or digits and is only used if the player table is empty.
+   The code must contain exactly four letters or digits and is only required when the player table
+   is empty.
 3. Set `RAILWAY_VOLUME_MOUNT_PATH=/data` if Railway has not supplied it automatically. The app then
    uses `/data/season27.db`. Alternatively set an explicit `SEASON27_DATABASE_URL`.
 4. Deploy. Startup applies all Alembic migrations before accepting traffic. Railway checks `/ready`;
@@ -18,8 +19,11 @@ store.
    redeploy, standings refresh, and an export before inviting players.
 
 Never put player identities or codes in repository files, build arguments, command output, or logs.
-Rotate the bootstrap code through the application after first login, then remove the bootstrap code
-variable from Railway. Back up the volume before migrations and before administrative corrections.
+After first login, add participants through **Admin → Players and login codes → Add participant**.
+Each initial code is shown once and only its secure hash is stored. Rotate the administrator code,
+then remove both bootstrap variables from Railway; subsequent starts use the administrator already
+stored in the persistent database. Back up the volume before migrations and before administrative
+corrections.
 
 ## Rollback
 

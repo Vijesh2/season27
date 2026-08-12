@@ -52,8 +52,6 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "production requires SEASON27_DATABASE_URL or RAILWAY_VOLUME_MOUNT_PATH"
                 )
-            if not self.bootstrap_admin_name or self.bootstrap_admin_code is None:
-                raise ValueError(
-                    "production requires bootstrap admin name and code environment variables"
-                )
+        if bool(self.bootstrap_admin_name) != bool(self.bootstrap_admin_code):
+            raise ValueError("bootstrap administrator name and code must be supplied together")
         return self

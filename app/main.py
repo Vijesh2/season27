@@ -54,6 +54,7 @@ from app.admin.service import (
     InvalidAdminAction,
     correct_prediction,
     correct_standings,
+    create_player,
     reinstate_player,
     reset_player_lock,
     reverse_swap,
@@ -150,8 +151,14 @@ def how_to_play() -> Details:
                     Div(
                         P("Use your swaps", cls="how-to-title"),
                         P(
-                            "In each swap window, exchange the positions of two teams "
-                            "to update your prediction."
+                            "You may exchange the positions of two teams once in each window: "
+                            "21 August–31 October 2026, 1 November–31 December 2026, "
+                            "1 January–28 February 2027, and 1 March–30 April 2027."
+                        ),
+                        P(
+                            "A confirmed swap cannot be undone. Each window is use it or lose it: "
+                            "an unused swap does not carry over to the next window.",
+                            cls="how-to-warning",
                         ),
                     ),
                     cls="how-to-step",
@@ -199,11 +206,13 @@ def _page(
         ),
         Body(
             Div(
-                f"{environment.upper()} ENVIRONMENT — NOT LIVE",
+                "DEVELOPMENT — LOCAL ONLY"
+                if environment == "development"
+                else f"{environment.upper()} ENVIRONMENT — NOT LIVE",
                 cls="environment-banner",
                 role="status",
             )
-            if environment in {"staging", "test"}
+            if environment in {"development", "staging", "test"}
             else None,
             how_to_play(),
             *content,
@@ -233,6 +242,10 @@ def create_app(
                 settings.bootstrap_admin_name,
                 settings.bootstrap_admin_code.get_secret_value(),
                 clock(),
+            )
+        elif session.scalar(select(Player.id).limit(1)) is None:
+            raise RuntimeError(
+                "An empty production database requires bootstrap administrator secrets"
             )
         seed_fixed_teams(session, season)
         if settings.environment == "development" and standings_source is None:
@@ -1386,6 +1399,28 @@ def create_app(
                     "Generated codes are displayed once. Only their secure hashes are retained.",
                     cls="notice",
                 ),
+                Div(
+                    H2("Add participant"),
+                    Form(
+                        Input(
+                            type="hidden",
+                            name="csrf_token",
+                            value=app_session.csrf_token,
+                        ),
+                        Label("Display name", fr="new-player-name"),
+                        Input(
+                            id="new-player-name",
+                            name="display_name",
+                            maxlength="80",
+                            required=True,
+                        ),
+                        Button("Add participant", type="submit", cls="save-button"),
+                        method="post",
+                        action="/admin/players/create",
+                        cls="admin-form",
+                    ),
+                    cls="section-card",
+                ),
                 *(
                     Div(
                         H2(player.display_name),
@@ -1447,6 +1482,38 @@ def create_app(
             ),
             title="Players · Season27",
         )
+
+    @app.post("/admin/players/create")
+    async def admin_player_create(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            with sessions() as session:
+                player, code = create_player(
+                    session,
+                    app_session.player_id,
+                    str(form.get("display_name", "")),
+                    clock(),
+                )
+        except InvalidAdminAction as error:
+            return HTMLResponse(str(error), status_code=422)
+        response = page(
+            Main(
+                H1("Participant added"),
+                P(f"Initial login code for {player.display_name}"),
+                P(code, cls="one-time-code"),
+                P("Copy and distribute this code now. It will not be shown again.", cls="notice"),
+                A("Return to players", href="/admin/players"),
+                cls="container login-container",
+            ),
+            title="Participant added · Season27",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.post("/admin/players/{player_id}/update")
     async def admin_player_update(request: Request, player_id: int) -> Response:

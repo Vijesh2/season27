@@ -43,6 +43,31 @@ def generate_login_code() -> str:
     return "".join(secrets.choice(CODE_ALPHABET) for _ in range(4))
 
 
+def create_player(
+    session: Session, actor_id: int, display_name: str, now: datetime
+) -> tuple[Player, str]:
+    name = display_name.strip()
+    if not name or len(name) > 80:
+        raise InvalidAdminAction("Enter a player name of no more than 80 characters.")
+    if session.scalar(select(Player.id).where(Player.display_name == name)) is not None:
+        raise InvalidAdminAction("That player name is already in use.")
+    code = generate_login_code()
+    player = Player(
+        display_name=name,
+        login_code_hash=hasher.hash(code),
+        is_admin=False,
+        is_active=True,
+        failed_login_count=0,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(player)
+    session.flush()
+    audit(session, "player_created", now, actor_id, {"target_player_id": player.id})
+    session.commit()
+    return player, code
+
+
 def update_player(
     session: Session,
     actor_id: int,

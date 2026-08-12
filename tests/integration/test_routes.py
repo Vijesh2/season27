@@ -31,6 +31,7 @@ def test_how_to_play_accordion_is_available_before_and_after_login(
     client: TestClient,
 ) -> None:
     login_page = client.get("/login")
+    assert "DEVELOPMENT — LOCAL ONLY" in login_page.text
     assert "<details" in login_page.text
     assert "<summary>How to play</summary>" in login_page.text
     assert "Predict the table" in login_page.text
@@ -51,6 +52,9 @@ def test_dashboard_shows_seeded_season_after_login(client: TestClient) -> None:
     assert "How to play" in response.text
     assert "Predict the table" in response.text
     assert "Use your swaps" in response.text
+    assert "21 August–31 October 2026" in response.text
+    assert "cannot be undone" in response.text
+    assert "does not carry over" in response.text
     assert "Lowest score wins" in response.text
     assert 'href="/prediction"' in response.text
     assert "Swap 4" in response.text
@@ -95,6 +99,7 @@ def test_session_cookie_security_attributes(database_url: str) -> None:
         bootstrap_admin_code=ADMIN.code,
     )
     with TestClient(create_app(settings), base_url="https://testserver") as secure_client:
+        assert "environment-banner" not in secure_client.get("/login").text
         response = login(secure_client, ADMIN.code)
     cookie = response.headers["set-cookie"]
     assert "HttpOnly" in cookie

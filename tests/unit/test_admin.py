@@ -9,6 +9,7 @@ from app.admin.service import (
     InvalidAdminAction,
     correct_prediction,
     correct_standings,
+    create_player,
     reinstate_player,
     require_reason,
     reset_player_lock,
@@ -73,6 +74,22 @@ def test_code_rotation_returns_once_hashes_code_and_revokes_sessions() -> None:
     assert event is not None and code not in str(event.event_metadata)
     with pytest.raises(VerifyMismatchError):
         hasher.verify(player.login_code_hash, "D002")
+
+
+def test_participant_creation_hashes_code_and_is_audited() -> None:
+    session, _, players = database()
+    now = datetime(2026, 8, 3, tzinfo=LONDON)
+    player, code = create_player(session, players[0].id, "New Participant", now)  # type: ignore[index]
+    assert player.display_name == "New Participant"
+    assert player.is_active and not player.is_admin
+    assert code not in player.login_code_hash
+    assert hasher.verify(player.login_code_hash, code)
+    event = session.scalar(select(AuditEvent).where(AuditEvent.event_type == "player_created"))
+    assert event is not None and code not in str(event.event_metadata)
+    with pytest.raises(InvalidAdminAction, match="already in use"):
+        create_player(session, players[0].id, "New Participant", now)  # type: ignore[index]
+    with pytest.raises(InvalidAdminAction, match="no more than 80"):
+        create_player(session, players[0].id, "", now)  # type: ignore[index]
 
 
 def test_player_update_validates_identity_and_self_deactivation() -> None:

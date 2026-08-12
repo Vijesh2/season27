@@ -104,6 +104,27 @@ def test_player_management_rotates_code_once_and_revokes_sessions(database_url: 
         assert generated_code not in admin.get("/admin/players").text
 
 
+def test_admin_adds_participant_and_code_is_shown_once(database_url: str) -> None:
+    settings = Settings(database_url=database_url, dev_now="2026-08-02T12:00:00")
+    app = create_app(settings)
+    with TestClient(app) as admin, TestClient(app) as participant:
+        login(admin, development_player_seeds()[0].code)
+        page = admin.get("/admin/players")
+        assert "Add participant" in page.text
+        created = admin.post(
+            "/admin/players/create",
+            data={"csrf_token": csrf(page.text), "display_name": "New Participant"},
+        )
+        assert created.status_code == 200
+        match = re.search(r'class="one-time-code">([A-Z2-9]{4})<', created.text)
+        assert match
+        code = match.group(1)
+        assert created.headers["cache-control"] == "no-store"
+        assert code not in admin.get("/admin/players").text
+        login(participant, code)
+        assert "Signed in as New Participant" in participant.get("/").text
+
+
 def test_admin_can_revoke_an_individual_device_session(database_url: str) -> None:
     settings = Settings(database_url=database_url, dev_now="2026-08-02T12:00:00")
     app = create_app(settings)
