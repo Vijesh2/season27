@@ -51,6 +51,8 @@ def test_dashboard_shows_seeded_season_after_login(client: TestClient) -> None:
     assert "Prediction period" in response.text
     assert "How to play" in response.text
     assert "Predict the table" in response.text
+    assert "prediction lock at 00:00 BST on 21 August 2026" in response.text
+    assert "revise and resubmit" in response.text
     assert "Use your swaps" in response.text
     assert "21 August–31 October 2026" in response.text
     assert "cannot be undone" in response.text

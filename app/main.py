@@ -141,7 +141,9 @@ def how_to_play() -> Details:
                         P("Predict the table", cls="how-to-title"),
                         P(
                             "Put all 20 teams in the order you think they will finish, "
-                            "then submit before the deadline."
+                            "then submit before the prediction lock at 00:00 BST on "
+                            "21 August 2026. You may revise and resubmit your prediction "
+                            "until that deadline."
                         ),
                     ),
                     cls="how-to-step",
