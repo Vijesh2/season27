@@ -27,11 +27,23 @@ def test_dashboard_requires_authentication(client: TestClient) -> None:
     assert response.headers["location"] == "/login"
 
 
+def test_media_predictions_are_public(client: TestClient) -> None:
+    response = client.get("/media-predictions")
+    assert response.status_code == 200
+    assert "The Athletic" in response.text
+    assert "17 August 2026" in response.text
+    assert response.text.index("Arsenal") < response.text.index("Manchester City")
+    assert response.text.index("Coventry City") < response.text.index("Hull City")
+    assert "do not participate in the game" in response.text
+    assert 'href="/login"' in response.text
+
+
 def test_how_to_play_accordion_is_available_before_and_after_login(
     client: TestClient,
 ) -> None:
     login_page = client.get("/login")
     assert "DEVELOPMENT — LOCAL ONLY" in login_page.text
+    assert 'href="/media-predictions"' in login_page.text
     assert "<details" in login_page.text
     assert "<summary>How to play</summary>" in login_page.text
     assert "Predict the table" in login_page.text

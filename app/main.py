@@ -89,6 +89,7 @@ from app.db.models import (
 )
 from app.db.session import create_database_engine, create_schema, session_factory
 from app.leaderboard.service import build_leaderboard, find_entry
+from app.media_predictions import MEDIA_PREDICTIONS
 from app.predictions.service import (
     InvalidPrediction,
     editing_is_open,
@@ -217,6 +218,11 @@ def _page(
             if environment in {"development", "staging", "test"}
             else None,
             how_to_play(),
+            Div(
+                A("Media predictions", href="/media-predictions"),
+                Span("No sign-in required", cls="public-link-note"),
+                cls="public-navigation",
+            ),
             *content,
         ),
         lang="en",
@@ -306,6 +312,48 @@ def create_app(
 
     def redirect_to_login() -> RedirectResponse:
         return RedirectResponse("/login", status_code=303)
+
+    @app.get("/media-predictions")
+    def media_predictions(request: Request) -> Response:
+        destination = "/" if current_session(request) else "/login"
+        return page(
+            Main(
+                A("← Back", href=destination),
+                H1("Media predictions"),
+                P(
+                    "Published predictions from prominent football and media platforms. "
+                    "These entries are shown for comparison and do not participate in the game."
+                ),
+                *(
+                    Div(
+                        H2(prediction.publisher),
+                        P(f"Published {prediction.published_date}", cls="last-saved"),
+                        Table(
+                            Thead(Tr(Th("Position"), Th("Team"))),
+                            Tbody(
+                                *(
+                                    Tr(Td(str(position)), Td(team))
+                                    for position, team in enumerate(
+                                        prediction.teams, start=1
+                                    )
+                                )
+                            ),
+                            cls="results-table media-prediction-table",
+                        ),
+                        A(
+                            f"View the original {prediction.publisher} prediction",
+                            href=prediction.source_url,
+                            target="_blank",
+                            rel="noopener noreferrer",
+                        ),
+                        cls="section-card",
+                    )
+                    for prediction in MEDIA_PREDICTIONS
+                ),
+                cls="container",
+            ),
+            title="Media predictions · Season27",
+        )
 
     @app.get("/login")
     def login_page(request: Request) -> Response:
