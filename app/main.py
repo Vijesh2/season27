@@ -219,8 +219,19 @@ def _page(
             else None,
             how_to_play(),
             Div(
-                A("Media predictions", href="/media-predictions"),
-                Span("No sign-in required", cls="public-link-note"),
+                A(
+                    Div(
+                        Span("Media predictions", cls="media-link-title"),
+                        Span(
+                            "Compare predictions from The Athletic and other platforms",
+                            cls="public-link-note",
+                        ),
+                    ),
+                    Span("→", cls="media-link-arrow", aria_hidden="true"),
+                    href="/media-predictions",
+                    cls="media-navigation-link",
+                    aria_label="View media predictions; no sign-in required",
+                ),
                 cls="public-navigation",
             ),
             *content,

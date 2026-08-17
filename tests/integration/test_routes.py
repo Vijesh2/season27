@@ -44,6 +44,8 @@ def test_how_to_play_accordion_is_available_before_and_after_login(
     login_page = client.get("/login")
     assert "DEVELOPMENT — LOCAL ONLY" in login_page.text
     assert 'href="/media-predictions"' in login_page.text
+    assert "Compare predictions from The Athletic and other platforms" in login_page.text
+    assert "View media predictions; no sign-in required" in login_page.text
     assert "<details" in login_page.text
     assert "<summary>How to play</summary>" in login_page.text
     assert "Predict the table" in login_page.text
