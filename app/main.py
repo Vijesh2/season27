@@ -338,12 +338,26 @@ def create_app(
                 *(
                     Div(
                         H2(prediction.publisher),
-                        P(f"Published {prediction.published_date}", cls="last-saved"),
+                        P(prediction.date_note, cls="last-saved"),
                         Table(
-                            Thead(Tr(Th("Position"), Th("Team"))),
+                            Thead(
+                                Tr(
+                                    Th("Position"),
+                                    Th("Team"),
+                                    Th("Projected points")
+                                    if prediction.expected_points
+                                    else None,
+                                )
+                            ),
                             Tbody(
                                 *(
-                                    Tr(Td(str(position)), Td(team))
+                                    Tr(
+                                        Td(str(position)),
+                                        Td(team),
+                                        Td(prediction.expected_points[position - 1])
+                                        if prediction.expected_points
+                                        else None,
+                                    )
                                     for position, team in enumerate(
                                         prediction.teams, start=1
                                     )

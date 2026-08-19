@@ -36,6 +36,12 @@ def test_media_predictions_are_public(client: TestClient) -> None:
     assert response.text.index("Coventry City") < response.text.index("Hull City")
     assert "do not participate in the game" in response.text
     assert 'href="/login"' in response.text
+    assert "Opta Analyst" in response.text
+    assert "Updated 19 August 2026" in response.text
+    assert "Projected points" in response.text
+    assert "73.35" in response.text
+    assert "40.49" in response.text
+    assert response.text.index("Liverpool") < response.text.index("Aston Villa")
 
 
 def test_how_to_play_accordion_is_available_before_and_after_login(

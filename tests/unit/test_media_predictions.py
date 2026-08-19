@@ -7,3 +7,8 @@ def test_media_predictions_contain_each_season_team_once() -> None:
     for prediction in MEDIA_PREDICTIONS:
         assert len(prediction.teams) == 20
         assert set(prediction.teams) == expected
+        if prediction.expected_points:
+            assert len(prediction.expected_points) == 20
+            assert list(map(float, prediction.expected_points)) == sorted(
+                map(float, prediction.expected_points), reverse=True
+            )
