@@ -7,7 +7,6 @@ class MediaPrediction:
     date_note: str
     source_url: str
     teams: tuple[str, ...]
-    expected_points: tuple[str, ...] | None = None
 
 
 MEDIA_PREDICTIONS = (
@@ -66,28 +65,6 @@ MEDIA_PREDICTIONS = (
             "Coventry City",
             "Ipswich Town",
             "Hull City",
-        ),
-        expected_points=(
-            "73.35",
-            "66.66",
-            "60.97",
-            "59.04",
-            "56.79",
-            "55.73",
-            "53.84",
-            "52.86",
-            "52.25",
-            "50.73",
-            "50.29",
-            "48.87",
-            "48.49",
-            "47.63",
-            "46.74",
-            "45.83",
-            "45.26",
-            "44.21",
-            "43.48",
-            "40.49",
         ),
     ),
 )

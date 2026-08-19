@@ -38,9 +38,12 @@ def test_media_predictions_are_public(client: TestClient) -> None:
     assert 'href="/login"' in response.text
     assert "Opta Analyst" in response.text
     assert "Updated 19 August 2026" in response.text
-    assert "Projected points" in response.text
-    assert "73.35" in response.text
-    assert "40.49" in response.text
+    assert "Third-party predictions" in response.text
+    assert "Projected points" not in response.text
+    assert "73.35" not in response.text
+    assert response.text.count("prediction-comparison-table") == 1
+    assert 'aria-label="Third-party prediction comparison table"' in response.text
+    assert "Select a publisher name to view its original prediction." in response.text
     assert response.text.index("Liverpool") < response.text.index("Aston Villa")
 
 
@@ -50,8 +53,8 @@ def test_how_to_play_accordion_is_available_before_and_after_login(
     login_page = client.get("/login")
     assert "DEVELOPMENT — LOCAL ONLY" in login_page.text
     assert 'href="/media-predictions"' in login_page.text
-    assert "Compare predictions from The Athletic and other platforms" in login_page.text
-    assert "View media predictions; no sign-in required" in login_page.text
+    assert "Compare predictions from independent publishers and platforms" in login_page.text
+    assert "View third-party predictions; no sign-in required" in login_page.text
     assert "<details" in login_page.text
     assert "<summary>How to play</summary>" in login_page.text
     assert "Predict the table" in login_page.text

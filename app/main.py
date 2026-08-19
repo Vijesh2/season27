@@ -12,6 +12,7 @@ from fasthtml.common import (
     A,
     Body,
     Button,
+    Caption,
     Details,
     Div,
     FastHTML,
@@ -221,16 +222,16 @@ def _page(
             Div(
                 A(
                     Div(
-                        Span("Media predictions", cls="media-link-title"),
+                        Span("Third-party predictions", cls="media-link-title"),
                         Span(
-                            "Compare predictions from The Athletic and other platforms",
+                            "Compare predictions from independent publishers and platforms",
                             cls="public-link-note",
                         ),
                     ),
                     Span("→", cls="media-link-arrow", aria_hidden="true"),
                     href="/media-predictions",
                     cls="media-navigation-link",
-                    aria_label="View media predictions; no sign-in required",
+                    aria_label="View third-party predictions; no sign-in required",
                 ),
                 cls="public-navigation",
             ),
@@ -330,54 +331,68 @@ def create_app(
         return page(
             Main(
                 A("← Back", href=destination),
-                H1("Media predictions"),
+                H1("Third-party predictions"),
                 P(
                     "Published predictions from prominent football and media platforms. "
                     "These entries are shown for comparison and do not participate in the game."
                 ),
-                *(
+                Div(
                     Div(
-                        H2(prediction.publisher),
-                        P(prediction.date_note, cls="last-saved"),
                         Table(
+                            Caption(
+                                "Predicted Premier League finishing positions by source",
+                                cls="visually-hidden",
+                            ),
                             Thead(
                                 Tr(
-                                    Th("Position"),
-                                    Th("Team"),
-                                    Th("Projected points")
-                                    if prediction.expected_points
-                                    else None,
+                                    Th("Pos", scope="col", cls="comparison-position"),
+                                    *(
+                                        Th(
+                                            A(
+                                                prediction.publisher,
+                                                href=prediction.source_url,
+                                                target="_blank",
+                                                rel="noopener noreferrer",
+                                            ),
+                                            Small(prediction.date_note),
+                                            scope="col",
+                                        )
+                                        for prediction in MEDIA_PREDICTIONS
+                                    ),
                                 )
                             ),
                             Tbody(
                                 *(
                                     Tr(
-                                        Td(str(position)),
-                                        Td(team),
-                                        Td(prediction.expected_points[position - 1])
-                                        if prediction.expected_points
-                                        else None,
+                                        Th(
+                                            str(position),
+                                            scope="row",
+                                            cls="comparison-position",
+                                        ),
+                                        *(
+                                            Td(prediction.teams[position - 1])
+                                            for prediction in MEDIA_PREDICTIONS
+                                        ),
                                     )
-                                    for position, team in enumerate(
-                                        prediction.teams, start=1
-                                    )
+                                    for position in range(1, 21)
                                 )
                             ),
-                            cls="results-table media-prediction-table",
+                            cls="results-table prediction-comparison-table",
                         ),
-                        A(
-                            f"View the original {prediction.publisher} prediction",
-                            href=prediction.source_url,
-                            target="_blank",
-                            rel="noopener noreferrer",
-                        ),
-                        cls="section-card",
-                    )
-                    for prediction in MEDIA_PREDICTIONS
+                        cls="prediction-comparison-scroll",
+                        role="region",
+                        aria_label="Third-party prediction comparison table",
+                        tabindex="0",
+                    ),
+                    P(
+                        "Select a publisher name to view its original prediction.",
+                        cls="comparison-note",
+                    ),
+                    cls="section-card comparison-card",
                 ),
-                cls="container",
+                cls="container wide-container",
             ),
-            title="Media predictions · Season27",
+            title="Third-party predictions · Season27",
         )
 
     @app.get("/login")
