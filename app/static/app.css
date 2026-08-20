@@ -120,6 +120,9 @@ a { color: #27683d; }
 .admin-order { display: grid; gap: .5rem; margin: 1rem 0; }
 .admin-order-row { align-items: center; display: grid; gap: .75rem; grid-template-columns: 7rem 1fr; }
 .audit-table { font-size: .8rem; }
+.participant-status-scroll { overflow-x: auto; }
+.participant-status-table { margin: .75rem 0 0; }
+.participant-status-table th:first-child, .participant-status-table td:first-child { text-align: left; }
 
 @media (max-width: 600px) {
   .results-table { font-size: .85rem; }

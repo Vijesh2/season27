@@ -1372,6 +1372,36 @@ def create_app(
         with sessions() as session:
             season = get_current_season(session)
             refresh_state = get_refresh_state(session, season.id) if season else None
+            participants = list(
+                session.scalars(
+                    select(Player).where(Player.is_active.is_(True)).order_by(Player.display_name)
+                )
+            )
+            prediction_statuses = (
+                {
+                    status.player_id: status
+                    for status in session.scalars(
+                        select(PredictionStatus).where(
+                            PredictionStatus.season_id == season.id
+                        )
+                    )
+                }
+                if season
+                else {}
+            )
+            open_swap_window = active_swap_window(season, clock()) if season else None
+            swapped_player_ids = (
+                set(
+                    session.scalars(
+                        select(Swap.player_id).where(
+                            Swap.season_id == season.id,
+                            Swap.swap_window_id == open_swap_window.id,
+                        )
+                    )
+                )
+                if season and open_swap_window
+                else set()
+            )
         return page(
             Main(
                 A("← Back to dashboard", href="/"),
@@ -1383,6 +1413,52 @@ def create_app(
                 )
                 if refresh_state and refresh_state.incident_open
                 else None,
+                Div(
+                    H2("Participant status"),
+                    P(f"Current season: {season.name}") if season else P("No season configured."),
+                    Div(
+                        Table(
+                            Thead(
+                                Tr(
+                                    Th("Participant", scope="col"),
+                                    Th("Prediction", scope="col"),
+                                    Th(
+                                        f"Swap {open_swap_window.sequence_number}",
+                                        scope="col",
+                                    )
+                                    if open_swap_window
+                                    else None,
+                                )
+                            ),
+                            Tbody(
+                                *(
+                                    Tr(
+                                        Td(player.display_name),
+                                        Td(
+                                            "Submitted"
+                                            if prediction_statuses.get(player.id)
+                                            and prediction_statuses[player.id].submitted_at
+                                            else "Not yet"
+                                        ),
+                                        Td(
+                                            "Executed"
+                                            if player.id in swapped_player_ids
+                                            else "Not yet"
+                                        )
+                                        if open_swap_window
+                                        else None,
+                                    )
+                                    for player in participants
+                                )
+                            ),
+                            cls="results-table participant-status-table",
+                        ),
+                        cls="participant-status-scroll",
+                    )
+                    if season and participants
+                    else None,
+                    cls="section-card",
+                ),
                 Div(
                     H2("Security and players"),
                     A("Manage players and login codes", href="/admin/players"),

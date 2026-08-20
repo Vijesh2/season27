@@ -56,6 +56,32 @@ def test_admin_routes_require_admin_and_csrf(database_url: str) -> None:
         assert rejected.status_code == 403
 
 
+def test_admin_shows_participant_prediction_status(database_url: str) -> None:
+    submit_prediction(database_url, 1)
+    settings = Settings(database_url=database_url, dev_now="2026-08-20T12:00:00")
+    with TestClient(create_app(settings)) as client:
+        login(client, development_player_seeds()[0].code)
+        page = client.get("/admin")
+
+    assert page.status_code == 200
+    assert "Participant status" in page.text
+    assert "Submitted" in page.text
+    assert "Not yet" in page.text
+    assert "Swap 1" not in page.text
+
+
+def test_admin_shows_swap_status_during_open_window(database_url: str) -> None:
+    submit_prediction(database_url, 1)
+    settings = Settings(database_url=database_url, dev_now="2026-08-21T12:00:00")
+    with TestClient(create_app(settings)) as client:
+        login(client, development_player_seeds()[0].code)
+        page = client.get("/admin")
+
+    assert page.status_code == 200
+    assert "Swap 1" in page.text
+    assert "Not yet" in page.text
+
+
 def test_player_management_rotates_code_once_and_revokes_sessions(database_url: str) -> None:
     settings = Settings(database_url=database_url, dev_now="2026-08-02T12:00:00")
     app = create_app(settings)
