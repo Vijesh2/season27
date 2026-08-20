@@ -28,7 +28,7 @@ def test_dashboard_requires_authentication(client: TestClient) -> None:
 
 
 def test_media_predictions_are_public(client: TestClient) -> None:
-    response = client.get("/media-predictions")
+    response = client.get("/third-party-predictions")
     assert response.status_code == 200
     assert "The Athletic" in response.text
     assert "17 August 2026" in response.text
@@ -55,7 +55,7 @@ def test_how_to_play_accordion_is_available_before_and_after_login(
 ) -> None:
     login_page = client.get("/login")
     assert "DEVELOPMENT — LOCAL ONLY" in login_page.text
-    assert 'href="/media-predictions"' in login_page.text
+    assert 'href="/third-party-predictions"' in login_page.text
     assert "Compare predictions from independent publishers and platforms" in login_page.text
     assert "View third-party predictions; no sign-in required" in login_page.text
     assert "<details" in login_page.text
@@ -67,6 +67,12 @@ def test_how_to_play_accordion_is_available_before_and_after_login(
         page = client.get(path)
         assert page.status_code == 200
         assert page.text.count("<summary>How to play</summary>") == 1
+
+
+def test_old_media_predictions_url_redirects_to_third_party_url(client: TestClient) -> None:
+    response = client.get("/media-predictions", follow_redirects=False)
+    assert response.status_code == 308
+    assert response.headers["location"] == "/third-party-predictions"
 
 
 def test_dashboard_shows_seeded_season_after_login(client: TestClient) -> None:

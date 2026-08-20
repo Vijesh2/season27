@@ -101,7 +101,7 @@ a { color: #27683d; }
 .prediction-comparison-scroll { overflow-x: auto; }
 .prediction-comparison-scroll:focus-visible { outline: 3px solid #3c9c5c; outline-offset: 3px; }
 .prediction-comparison-table { margin: 0; min-width: 100%; table-layout: auto; width: max-content; }
-.prediction-comparison-table th:not(.comparison-position), .prediction-comparison-table td { min-width: 250px; text-align: left; }
+.prediction-comparison-table th:not(.comparison-position), .results-table.prediction-comparison-table td { min-width: 250px; text-align: left; }
 .prediction-comparison-table thead th { text-transform: none; vertical-align: top; }
 .prediction-comparison-table thead a { display: block; font-size: 1rem; font-weight: 850; }
 .prediction-comparison-table thead small { color: #607066; display: block; font-size: .75rem; font-weight: 500; margin-top: .2rem; }

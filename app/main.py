@@ -229,7 +229,7 @@ def _page(
                         ),
                     ),
                     Span("→", cls="media-link-arrow", aria_hidden="true"),
-                    href="/media-predictions",
+                    href="/third-party-predictions",
                     cls="media-navigation-link",
                     aria_label="View third-party predictions; no sign-in required",
                 ),
@@ -326,7 +326,11 @@ def create_app(
         return RedirectResponse("/login", status_code=303)
 
     @app.get("/media-predictions")
-    def media_predictions(request: Request) -> Response:
+    def legacy_media_predictions() -> Response:
+        return RedirectResponse("/third-party-predictions", status_code=308)
+
+    @app.get("/third-party-predictions")
+    def third_party_predictions(request: Request) -> Response:
         destination = "/" if current_session(request) else "/login"
         return page(
             Main(
