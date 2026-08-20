@@ -38,6 +38,9 @@ def test_media_predictions_are_public(client: TestClient) -> None:
     assert 'href="/login"' in response.text
     assert "Opta Analyst" in response.text
     assert "Updated 19 August 2026" in response.text
+    assert "The Telegraph" in response.text
+    assert "Published 20 August 2026" in response.text
+    assert "premier-league-table-data-arsenal-win-spurs-relegation" in response.text
     assert "Third-party predictions" in response.text
     assert "Projected points" not in response.text
     assert "73.35" not in response.text

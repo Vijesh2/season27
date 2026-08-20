@@ -67,4 +67,34 @@ MEDIA_PREDICTIONS = (
             "Hull City",
         ),
     ),
+    MediaPrediction(
+        publisher="The Telegraph",
+        date_note="Published 20 August 2026",
+        source_url=(
+            "https://www.telegraph.co.uk/football/2026/08/20/"
+            "premier-league-table-data-arsenal-win-spurs-relegation/"
+        ),
+        teams=(
+            "Arsenal",
+            "Manchester City",
+            "Liverpool",
+            "Manchester United",
+            "Aston Villa",
+            "AFC Bournemouth",
+            "Brighton & Hove Albion",
+            "Nottingham Forest",
+            "Newcastle United",
+            "Brentford",
+            "Chelsea",
+            "Leeds United",
+            "Everton",
+            "Fulham",
+            "Crystal Palace",
+            "Tottenham Hotspur",
+            "Sunderland",
+            "Coventry City",
+            "Ipswich Town",
+            "Hull City",
+        ),
+    ),
 )
