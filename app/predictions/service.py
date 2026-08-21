@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import delete, select
@@ -17,6 +18,35 @@ from app.teams.service import get_season_teams
 
 class InvalidPrediction(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class ParticipantPrediction:
+    player: Player
+    teams: tuple[str, ...]
+
+
+def get_participant_predictions(
+    session: Session, season_id: int
+) -> list[ParticipantPrediction]:
+    players = session.scalars(
+        select(Player)
+        .join(PredictionStatus, PredictionStatus.player_id == Player.id)
+        .where(
+            PredictionStatus.season_id == season_id,
+            PredictionStatus.locked_at.is_not(None),
+            PredictionStatus.excluded_at.is_(None),
+            Player.is_active.is_(True),
+        )
+        .order_by(Player.display_name)
+    ).all()
+    return [
+        ParticipantPrediction(
+            player=player,
+            teams=tuple(item.team.name for item in get_draft(session, player.id, season_id)),
+        )
+        for player in players
+    ]
 
 
 def editing_is_open(season: Season, now: datetime) -> bool:

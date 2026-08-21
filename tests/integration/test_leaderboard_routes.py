@@ -137,6 +137,7 @@ def test_predictions_stay_private_before_deadline_even_for_admin(database_url: s
             login(client, development_player_seeds()[player_index].code)
             assert client.get("/leaderboard").status_code == 403
             assert client.get("/leaderboard/1").status_code == 403
+            assert client.get("/participant-predictions").status_code == 403
             assert client.get("/activity").status_code == 403
 
 
@@ -153,6 +154,16 @@ def test_leaderboard_reveals_scores_and_player_details_after_deadline(
         assert development_player_seeds()[1].display_name in page.text
         assert development_player_seeds()[2].display_name not in page.text
         assert page.text.count("/leaderboard/") == 2
+        assert 'href="/participant-predictions"' in page.text
+        comparison = client.get("/participant-predictions")
+        assert comparison.status_code == 200
+        assert 'aria-label="Participant prediction comparison table"' in comparison.text
+        assert comparison.text.count("prediction-comparison-table") == 1
+        assert comparison.text.count("<tr>") == 21
+        assert development_player_seeds()[0].display_name in comparison.text
+        assert development_player_seeds()[1].display_name in comparison.text
+        assert development_player_seeds()[2].display_name not in comparison.text
+        assert comparison.text.count("/leaderboard/") == 2
         detail = client.get("/leaderboard/1")
         assert detail.status_code == 200
         assert development_player_seeds()[0].display_name in detail.text

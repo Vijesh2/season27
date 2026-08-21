@@ -96,6 +96,7 @@ from app.predictions.service import (
     editing_is_open,
     ensure_draft,
     get_draft,
+    get_participant_predictions,
     get_status,
     has_unsubmitted_changes,
     move_team,
@@ -984,6 +985,85 @@ def create_app(
             return HTMLResponse("This season is unavailable for this player.", status_code=403)
         return None
 
+    @app.get("/participant-predictions")
+    def participant_predictions_page(request: Request) -> Response:
+        app_session = current_session(request)
+        if app_session is None:
+            return redirect_to_login()
+        with sessions() as session:
+            season = get_current_season(session)
+            if season is None:
+                return HTMLResponse("No season configured", status_code=409)
+            denied = game_access(session, app_session.player_id, season, clock())
+            if denied:
+                return denied
+            predictions = get_participant_predictions(session, season.id)
+            return page(
+                Main(
+                    A("← Back to leaderboard", href="/leaderboard"),
+                    H1("Participant predictions"),
+                    P(
+                        "Compare every participating player's predicted finishing table."
+                    ),
+                    Div(
+                        Div(
+                            Table(
+                                Caption(
+                                    "Predicted Premier League finishing positions by participant",
+                                    cls="visually-hidden",
+                                ),
+                                Thead(
+                                    Tr(
+                                        Th("Pos", scope="col", cls="comparison-position"),
+                                        *(
+                                            Th(
+                                                A(
+                                                    prediction.player.display_name,
+                                                    href=(
+                                                        f"/leaderboard/"
+                                                        f"{prediction.player.id}"
+                                                    ),
+                                                ),
+                                                scope="col",
+                                            )
+                                            for prediction in predictions
+                                        ),
+                                    )
+                                ),
+                                Tbody(
+                                    *(
+                                        Tr(
+                                            Th(
+                                                str(position),
+                                                scope="row",
+                                                cls="comparison-position",
+                                            ),
+                                            *(
+                                                Td(prediction.teams[position - 1])
+                                                for prediction in predictions
+                                            ),
+                                        )
+                                        for position in range(1, 21)
+                                    )
+                                ),
+                                cls="results-table prediction-comparison-table",
+                            ),
+                            cls="prediction-comparison-scroll",
+                            role="region",
+                            aria_label="Participant prediction comparison table",
+                            tabindex="0",
+                        ),
+                        P(
+                            "Select a participant name to view their score breakdown.",
+                            cls="comparison-note",
+                        ),
+                        cls="section-card comparison-card",
+                    ),
+                    cls="container wide-container",
+                ),
+                title="Participant predictions · Season27",
+            )
+
     @app.get("/leaderboard")
     def leaderboard_page(request: Request) -> Response:
         app_session = current_session(request)
@@ -1090,6 +1170,10 @@ def create_app(
                             )
                         ),
                         cls="results-table",
+                    ),
+                    A(
+                        "Compare all participant predictions",
+                        href="/participant-predictions",
                     ),
                     A("View shared swap activity", href="/activity"),
                     cls="container",
