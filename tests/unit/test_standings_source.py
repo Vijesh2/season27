@@ -19,6 +19,7 @@ def test_bbc_fixture_parses_all_rows_and_final_state() -> None:
     assert table.rows[0].identity == "afc-bournemouth"
     assert table.rows[0].name == "AFC Bournemouth"
     assert (table.rows[0].position, table.rows[0].played, table.rows[0].points) == (1, 38, 81)
+    assert table.rows[0].goals_scored == 0
     assert table.is_final
 
 

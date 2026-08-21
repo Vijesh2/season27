@@ -19,6 +19,7 @@ class StandingInput:
     played: int | None = None
     points: int | None = None
     goal_difference: int | None = None
+    goals_scored: int | None = None
 
 
 def validate_standings(session: Session, season_id: int, rows: list[StandingInput]) -> None:
@@ -63,6 +64,7 @@ def create_snapshot(
             played=row.played,
             points=row.points,
             goal_difference=row.goal_difference,
+            goals_scored=row.goals_scored,
         )
         for row in rows
     ]
@@ -102,6 +104,7 @@ def seed_development_snapshot(
                 played=5,
                 points=max(0, 18 - position),
                 goal_difference=11 - position,
+                goals_scored=max(0, 30 - position),
             )
             for position, item in enumerate(rotated, start=1)
         ],

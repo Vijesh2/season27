@@ -382,6 +382,7 @@ def correct_standings(
                 played=existing[team_id].played,
                 points=existing[team_id].points,
                 goal_difference=existing[team_id].goal_difference,
+                goals_scored=existing[team_id].goals_scored,
             )
             for position, team_id in enumerate(team_ids, start=1)
         ],

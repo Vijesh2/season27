@@ -1,6 +1,7 @@
 import re
 from datetime import datetime
 
+from bs4 import BeautifulSoup
 from sqlalchemy import delete
 from starlette.testclient import TestClient
 
@@ -48,6 +49,48 @@ def reversed_source_table() -> SourceTable:
         ),
         is_final=False,
     )
+
+
+def unplayed_source_table() -> SourceTable:
+    return SourceTable(
+        rows=tuple(
+            ExternalStanding(
+                identity=team.source_identity,
+                name=team.name,
+                position=index,
+                played=0,
+                points=0,
+                goal_difference=0,
+            )
+            for index, team in enumerate(FIXED_2026_27_TEAMS, start=1)
+        ),
+        is_final=False,
+    )
+
+
+def opening_match_source_table(*, draw: bool) -> SourceTable:
+    rows: list[ExternalStanding] = []
+    for index, team in enumerate(FIXED_2026_27_TEAMS, start=1):
+        if index == 1:
+            position = 1
+            played, points, goal_difference = 1, 1 if draw else 3, 0 if draw else 1
+        elif index == 20:
+            position = 2 if draw else 20
+            played, points, goal_difference = 1, 1 if draw else 0, 0 if draw else -1
+        else:
+            position = index + 1 if draw else index
+            played, points, goal_difference = 0, 0, 0
+        rows.append(
+            ExternalStanding(
+                identity=team.source_identity,
+                name=team.name,
+                position=position,
+                played=played,
+                points=points,
+                goal_difference=goal_difference,
+            )
+        )
+    return SourceTable(rows=tuple(rows), is_final=False)
 
 
 def login(client: TestClient, code: str) -> None:
@@ -119,6 +162,64 @@ def test_leaderboard_reveals_scores_and_player_details_after_deadline(
         assert "Penalty" in detail.text
         assert detail.text.count("<tr>") == 21
         assert client.get("/leaderboard/99999").status_code == 404
+
+
+def test_every_player_is_joint_first_before_any_games_are_played(
+    database_url: str,
+) -> None:
+    submit_players(database_url, (0, 1))
+    app = create_app(
+        Settings(database_url=database_url, dev_now="2026-08-21T12:00:00"),
+        standings_source=FixedSource(unplayed_source_table()),
+    )
+    with TestClient(app) as client:
+        login(client, development_player_seeds()[0].code)
+        page = client.get("/leaderboard")
+        assert page.status_code == 200
+        rows = BeautifulSoup(page.text, "html.parser").select("table tbody tr")
+        assert len(rows) == 2
+        assert {row.find_all("td")[0].get_text(strip=True) for row in rows} == {"1"}
+
+        detail = client.get("/leaderboard/1")
+        assert detail.status_code == 200
+        detail_rows = BeautifulSoup(detail.text, "html.parser").select("table tbody tr")
+        actual_positions = [row.find_all("td")[2].get_text(strip=True) for row in detail_rows]
+        assert actual_positions == ["1"] * 20
+
+
+def test_identical_sporting_records_share_positions_after_a_win(
+    database_url: str,
+) -> None:
+    submit_players(database_url, (0,))
+    app = create_app(
+        Settings(database_url=database_url, dev_now="2026-08-21T12:00:00"),
+        standings_source=FixedSource(opening_match_source_table(draw=False)),
+    )
+    with TestClient(app) as client:
+        login(client, development_player_seeds()[0].code)
+        detail = client.get("/leaderboard/1")
+        rows = BeautifulSoup(detail.text, "html.parser").select("table tbody tr")
+        actual_positions = [row.find_all("td")[2].get_text(strip=True) for row in rows]
+        assert actual_positions.count("1") == 1
+        assert actual_positions.count("2") == 18
+        assert actual_positions.count("20") == 1
+
+
+def test_identical_sporting_records_share_positions_after_a_draw(
+    database_url: str,
+) -> None:
+    submit_players(database_url, (0,))
+    app = create_app(
+        Settings(database_url=database_url, dev_now="2026-08-21T12:00:00"),
+        standings_source=FixedSource(opening_match_source_table(draw=True)),
+    )
+    with TestClient(app) as client:
+        login(client, development_player_seeds()[0].code)
+        detail = client.get("/leaderboard/1")
+        rows = BeautifulSoup(detail.text, "html.parser").select("table tbody tr")
+        actual_positions = [row.find_all("td")[2].get_text(strip=True) for row in rows]
+        assert actual_positions.count("1") == 2
+        assert actual_positions.count("3") == 18
 
 
 def test_final_snapshot_is_labelled_final(database_url: str) -> None:

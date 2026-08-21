@@ -112,6 +112,7 @@ def _convert_rows(
                 played=row.played,
                 points=row.points,
                 goal_difference=row.goal_difference,
+                goals_scored=row.goals_scored,
             )
         )
     return converted
@@ -121,11 +122,24 @@ def _same_table(
     snapshot: StandingsSnapshot, rows: list[StandingInput], is_final: bool
 ) -> bool:
     stored = {
-        row.team_id: (row.position, row.played, row.points, row.goal_difference)
+        row.team_id: (
+            row.position,
+            row.played,
+            row.points,
+            row.goal_difference,
+            row.goals_scored,
+        )
         for row in snapshot.rows
     }
     imported = {
-        row.team_id: (row.position, row.played, row.points, row.goal_difference) for row in rows
+        row.team_id: (
+            row.position,
+            row.played,
+            row.points,
+            row.goal_difference,
+            row.goals_scored,
+        )
+        for row in rows
     }
     return stored == imported and snapshot.is_final == is_final
 

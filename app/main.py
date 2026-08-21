@@ -279,6 +279,7 @@ def create_app(
                         played=row.played or 0,
                         points=row.points or 0,
                         goal_difference=row.goal_difference or 0,
+                        goals_scored=row.goals_scored or 0,
                     )
                     for row in snapshot.rows
                 )
@@ -2322,6 +2323,7 @@ def create_app(
                     "played": row.played,
                     "points": row.points,
                     "goal_difference": row.goal_difference,
+                    "goals_scored": row.goals_scored,
                     "is_final": snapshot.is_final,
                 }
                 for row in snapshot.rows

@@ -226,6 +226,7 @@ class Standing(Base):
     played: Mapped[int | None] = mapped_column(Integer, nullable=True)
     points: Mapped[int | None] = mapped_column(Integer, nullable=True)
     goal_difference: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    goals_scored: Mapped[int | None] = mapped_column(Integer, nullable=True)
     snapshot: Mapped[StandingsSnapshot] = relationship(back_populates="rows")
     team: Mapped[Team] = relationship()
 

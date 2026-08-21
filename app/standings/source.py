@@ -19,6 +19,7 @@ class ExternalStanding:
     played: int
     points: int
     goal_difference: int
+    goals_scored: int = 0
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,11 @@ def _number(row: Tag, label: str) -> int:
         raise StandingsSourceError("A standings value is invalid.") from error
 
 
+def _optional_number(row: Tag, label: str) -> int:
+    cell = row.find("td", attrs={"aria-label": label})
+    return _number(row, label) if cell is not None else 0
+
+
 def parse_bbc_table(html: str) -> SourceTable:
     soup = BeautifulSoup(html, "html.parser")
     table = soup.find("table", attrs={"data-testid": "football-table"})
@@ -88,6 +94,9 @@ def parse_bbc_table(html: str) -> SourceTable:
                 played=_number(row, "Played"),
                 points=_number(row, "Points"),
                 goal_difference=_number(row, "Goal Difference"),
+                # Older saved fixtures/pages may omit this column; live BBC
+                # tables include it as "Goals For".
+                goals_scored=_optional_number(row, "Goals For"),
             )
         )
     if len(parsed) != 20:

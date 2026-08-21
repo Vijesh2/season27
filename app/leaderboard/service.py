@@ -13,10 +13,28 @@ class LeaderboardEntry:
     score: PlayerScore
 
 
+def _positions_for_scoring(snapshot: StandingsSnapshot) -> dict[int, int]:
+    first_position_by_record: dict[tuple[int, int, int], int] = {}
+    positions: dict[int, int] = {}
+    for row in snapshot.rows:
+        if (
+            row.points is None
+            or row.goal_difference is None
+            or row.goals_scored is None
+        ):
+            positions[row.team_id] = row.position
+            continue
+        record = (row.points, row.goal_difference, row.goals_scored)
+        positions[row.team_id] = first_position_by_record.setdefault(record, row.position)
+    return positions
+
+
 def build_leaderboard(
     session: Session, season_id: int, snapshot: StandingsSnapshot
 ) -> list[LeaderboardEntry]:
-    actual = {row.team_id: row.position for row in snapshot.rows}
+    # Publishers use a unique (often alphabetical) order when sporting records
+    # are equal. Collapse those arbitrary distinctions into competition ranks.
+    actual = _positions_for_scoring(snapshot)
     eligible = session.execute(
         select(Player, PredictionStatus)
         .join(PredictionStatus, PredictionStatus.player_id == Player.id)
