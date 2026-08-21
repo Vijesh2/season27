@@ -1046,9 +1046,15 @@ def create_app(
                                         for position in range(1, 21)
                                     )
                                 ),
-                                cls="results-table prediction-comparison-table",
+                                cls=(
+                                    "results-table prediction-comparison-table "
+                                    "participant-comparison-table"
+                                ),
                             ),
-                            cls="prediction-comparison-scroll",
+                            cls=(
+                                "prediction-comparison-scroll "
+                                "participant-comparison-scroll"
+                            ),
                             role="region",
                             aria_label="Participant prediction comparison table",
                             tabindex="0",
@@ -1059,7 +1065,7 @@ def create_app(
                         ),
                         cls="section-card comparison-card",
                     ),
-                    cls="container wide-container",
+                    cls="container wide-container participant-comparison-container",
                 ),
                 title="Participant predictions · Season27",
             )
@@ -1171,11 +1177,14 @@ def create_app(
                         ),
                         cls="results-table",
                     ),
-                    A(
-                        "Compare all participant predictions",
-                        href="/participant-predictions",
+                    Div(
+                        A(
+                            "Compare all participant predictions",
+                            href="/participant-predictions",
+                        ),
+                        A("View shared swap activity", href="/activity"),
+                        cls="leaderboard-actions",
                     ),
-                    A("View shared swap activity", href="/activity"),
                     cls="container",
                 ),
                 title="Leaderboard · Season27",

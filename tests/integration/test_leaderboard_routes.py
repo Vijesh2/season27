@@ -158,12 +158,15 @@ def test_leaderboard_reveals_scores_and_player_details_after_deadline(
         comparison = client.get("/participant-predictions")
         assert comparison.status_code == 200
         assert 'aria-label="Participant prediction comparison table"' in comparison.text
+        assert "participant-comparison-table" in comparison.text
+        assert "participant-comparison-container" in comparison.text
         assert comparison.text.count("prediction-comparison-table") == 1
         assert comparison.text.count("<tr>") == 21
         assert development_player_seeds()[0].display_name in comparison.text
         assert development_player_seeds()[1].display_name in comparison.text
         assert development_player_seeds()[2].display_name not in comparison.text
         assert comparison.text.count("/leaderboard/") == 2
+        assert 'class="leaderboard-actions"' in page.text
         detail = client.get("/leaderboard/1")
         assert detail.status_code == 200
         assert development_player_seeds()[0].display_name in detail.text
