@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -103,6 +104,79 @@ class Team(Base):
     slug: Mapped[str] = mapped_column(String(100), unique=True)
     source_identity: Mapped[str] = mapped_column(String(100), unique=True)
     badge_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class FootballResult(Base):
+    __tablename__ = "football_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_event_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    competition: Mapped[str] = mapped_column(String(100))
+    home_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="RESTRICT"))
+    away_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="RESTRICT"))
+    home_score: Mapped[int] = mapped_column(Integer)
+    away_score: Mapped[int] = mapped_column(Integer)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    event_status: Mapped[str] = mapped_column(String(30))
+    source_url: Mapped[str] = mapped_column(String(500))
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source_metadata: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    home_team: Mapped[Team] = relationship(foreign_keys=[home_team_id])
+    away_team: Mapped[Team] = relationship(foreign_keys=[away_team_id])
+
+
+class Bulletin(Base):
+    __tablename__ = "bulletins"
+    __table_args__ = (
+        UniqueConstraint("season_id", "period_end"),
+        CheckConstraint(
+            "status IN ('draft', 'published', 'suppressed')",
+            name="ck_bulletins_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"))
+    slug: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(120))
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    fact_pack: Mapped[dict[str, object]] = mapped_column(JSON)
+    created_by_player_id: Mapped[int] = mapped_column(
+        ForeignKey("players.id", ondelete="RESTRICT")
+    )
+    published_by_player_id: Mapped[int | None] = mapped_column(
+        ForeignKey("players.id", ondelete="RESTRICT"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    suppressed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    season: Mapped[Season] = relationship()
+    created_by: Mapped[Player] = relationship(foreign_keys=[created_by_player_id])
+    published_by: Mapped[Player | None] = relationship(foreign_keys=[published_by_player_id])
+    matches: Mapped[list["BulletinMatch"]] = relationship(
+        back_populates="bulletin", cascade="all, delete-orphan"
+    )
+
+
+class BulletinMatch(Base):
+    __tablename__ = "bulletin_matches"
+    __table_args__ = (UniqueConstraint("bulletin_id", "football_result_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bulletin_id: Mapped[int] = mapped_column(
+        ForeignKey("bulletins.id", ondelete="CASCADE")
+    )
+    football_result_id: Mapped[int] = mapped_column(
+        ForeignKey("football_results.id", ondelete="RESTRICT")
+    )
+    bulletin: Mapped[Bulletin] = relationship(back_populates="matches")
+    football_result: Mapped[FootballResult] = relationship()
 
 
 class SeasonTeam(Base):

@@ -3,7 +3,7 @@ import hmac
 import io
 import secrets
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import uvicorn
 from fasthtml.common import (
@@ -38,6 +38,7 @@ from fasthtml.common import (
     Table,
     Tbody,
     Td,
+    Textarea,
     Th,
     Thead,
     Title,
@@ -76,11 +77,26 @@ from app.auth.service import (
     seed_development_players,
     throttle_key,
 )
+from app.bulletins import BULLETIN_TITLE
+from app.bulletins.automation import ResultsSource, fact_pack_digest, prepare_bulletin
+from app.bulletins.fact_pack import FactPackError, build_fact_pack
+from app.bulletins.service import (
+    InvalidBulletin,
+    get_published_bulletins,
+    publish_bulletin,
+    save_and_publish_automated,
+    suppress_bulletin,
+    update_bulletin,
+)
+from app.bulletins.service import (
+    save_draft as save_bulletin_draft,
+)
 from app.clock import Clock, MutableClock, clock_from_iso
 from app.config import Settings
 from app.db.models import (
     AppSession,
     AuditEvent,
+    Bulletin,
     Player,
     Prediction,
     PredictionStatus,
@@ -104,6 +120,7 @@ from app.predictions.service import (
     save_draft,
     submit_prediction,
 )
+from app.results.source import BBCResultsSource, ResultsSourceError
 from app.seasons import calculate_phase, get_current_season, london, seed_development_season
 from app.standings.refresh import (
     RefreshOutcome,
@@ -131,6 +148,29 @@ from app.teams.service import get_season_teams, seed_fixed_teams
 
 def format_time(value: datetime) -> str:
     return london(value).strftime("%d %B %Y, %H:%M %Z")
+
+
+def bulletin_card(bulletin: Bulletin) -> Div:
+    return Div(
+        P(BULLETIN_TITLE, cls="bulletin-kicker"),
+        H2(A(bulletin.title, href=f"/bulletins/{bulletin.slug}")),
+        P(bulletin.body, cls="bulletin-body"),
+        P(
+            f"Published {format_time(bulletin.published_at)}"
+            if bulletin.published_at
+            else "Published",
+            cls="bulletin-date",
+        ),
+        A("Previous editions", href="/bulletins", cls="bulletin-archive-link"),
+        cls="bulletin-card",
+    )
+
+
+def parse_local_datetime(value: object) -> datetime:
+    try:
+        return london(datetime.fromisoformat(str(value)))
+    except ValueError as error:
+        raise InvalidBulletin("Enter a valid reporting date and time.") from error
 
 
 def how_to_play() -> Details:
@@ -247,6 +287,7 @@ def create_app(
     settings: Settings | None = None,
     clock: Clock | None = None,
     standings_source: StandingsSource | None = None,
+    results_source: ResultsSource | None = None,
 ) -> FastHTML:
     settings = settings or Settings()
     clock = clock or clock_from_iso(settings.dev_now)
@@ -309,6 +350,147 @@ def create_app(
             except (KeyError, TypeError, ValueError):
                 return JSONResponse({"status": "invalid"}, status_code=400)
             return JSONResponse({"status": "ok", "now": clock().isoformat()})
+
+    def automation_authorized(request: Request) -> bool:
+        secret = settings.bulletin_automation_token
+        authorization = request.headers.get("authorization", "")
+        if secret is None or not authorization.startswith("Bearer "):
+            return False
+        return hmac.compare_digest(
+            secret.get_secret_value(), authorization.removeprefix("Bearer ")
+        )
+
+    def automation_actor(session: Session) -> Player | None:
+        return session.scalar(
+            select(Player).where(
+                Player.display_name == settings.bulletin_automation_actor_name,
+                Player.is_admin.is_(True),
+                Player.is_active.is_(True),
+            )
+        )
+
+    def configured_result_source() -> ResultsSource:
+        return results_source or BBCResultsSource(
+            settings.results_url,
+            settings.results_connect_timeout_seconds,
+            settings.results_read_timeout_seconds,
+            settings.results_retry_attempts,
+        )
+
+    def parse_automation_datetime(value: object) -> datetime | None:
+        if value is None:
+            return None
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError("Automation timestamps must include a timezone.")
+        return parsed
+
+    @app.post("/internal/bulletins/prepare")
+    async def automation_prepare(request: Request) -> JSONResponse:
+        if not automation_authorized(request):
+            return JSONResponse({"status": "forbidden"}, status_code=403)
+        try:
+            payload = await request.json()
+            start = parse_automation_datetime(payload.get("period_start"))
+            end = parse_automation_datetime(payload.get("period_end"))
+            with sessions() as session:
+                season = get_current_season(session)
+                if season is None:
+                    return JSONResponse({"status": "no_season"}, status_code=409)
+                prepared = prepare_bulletin(
+                    session,
+                    season,
+                    configured_result_source(),
+                    standings_source,
+                    settings,
+                    clock(),
+                    period_start=start,
+                    period_end=end,
+                )
+            return JSONResponse(
+                {
+                    "status": "already_published"
+                    if prepared.existing_status == "published"
+                    else "prepared",
+                    "fact_pack_digest": prepared.fact_pack_digest,
+                    "fact_pack": prepared.fact_pack.to_dict(),
+                    "results_import": {
+                        "inserted": prepared.results_inserted,
+                        "updated": prepared.results_updated,
+                    },
+                    "standings_outcome": prepared.standings_outcome,
+                    "existing_status": prepared.existing_status,
+                }
+            )
+        except (ValueError, FactPackError) as error:
+            return JSONResponse({"status": "invalid", "detail": str(error)}, status_code=422)
+        except (ResultsSourceError, RuntimeError):
+            return JSONResponse({"status": "source_unavailable"}, status_code=503)
+
+    @app.post("/internal/bulletins/publish")
+    async def automation_publish(request: Request) -> JSONResponse:
+        if not automation_authorized(request):
+            return JSONResponse({"status": "forbidden"}, status_code=403)
+        try:
+            payload = await request.json()
+            start = parse_automation_datetime(payload.get("period_start"))
+            end = parse_automation_datetime(payload.get("period_end"))
+            expected_digest = str(payload["fact_pack_digest"])
+            body = str(payload["body"])
+            with sessions() as session:
+                season = get_current_season(session)
+                actor = automation_actor(session)
+                if season is None or actor is None:
+                    return JSONResponse({"status": "not_configured"}, status_code=409)
+                prepared = prepare_bulletin(
+                    session,
+                    season,
+                    configured_result_source(),
+                    standings_source,
+                    settings,
+                    clock(),
+                    period_start=start,
+                    period_end=end,
+                )
+                if not hmac.compare_digest(prepared.fact_pack_digest, expected_digest):
+                    return JSONResponse({"status": "facts_changed"}, status_code=409)
+                bulletin, changed = save_and_publish_automated(
+                    session, prepared.fact_pack, body, actor.id, clock()
+                )
+            return JSONResponse(
+                {
+                    "status": "published" if changed else "already_published",
+                    "slug": bulletin.slug,
+                    "public_path": f"/bulletins/{bulletin.slug}",
+                    "fact_pack_digest": fact_pack_digest(prepared.fact_pack),
+                }
+            )
+        except KeyError:
+            return JSONResponse({"status": "invalid"}, status_code=422)
+        except (ValueError, FactPackError, InvalidBulletin) as error:
+            return JSONResponse({"status": "invalid", "detail": str(error)}, status_code=422)
+        except (ResultsSourceError, RuntimeError):
+            return JSONResponse({"status": "source_unavailable"}, status_code=503)
+
+    @app.get("/internal/bulletins/{slug}")
+    def automation_verify(slug: str, request: Request) -> JSONResponse:
+        if not automation_authorized(request):
+            return JSONResponse({"status": "forbidden"}, status_code=403)
+        with sessions() as session:
+            bulletin = session.scalar(select(Bulletin).where(Bulletin.slug == slug))
+            if bulletin is None:
+                return JSONResponse({"status": "not_found"}, status_code=404)
+            return JSONResponse(
+                {
+                    "status": bulletin.status,
+                    "slug": bulletin.slug,
+                    "title": bulletin.title,
+                    "body": bulletin.body,
+                    "published_at": bulletin.published_at.isoformat()
+                    if bulletin.published_at
+                    else None,
+                }
+            )
 
     def page(
         *content: object, title: str = "Season 27", status_code: int = 200
@@ -548,6 +730,8 @@ def create_app(
             )
             admin_link = A("Admin", href="/admin") if app_session.player.is_admin else None
             season_teams = get_season_teams(session, season.id)
+            published_bulletins = get_published_bulletins(session, season.id)
+            latest_bulletin = published_bulletins[0] if published_bulletins else None
             prediction_status = get_status(session, app_session.player_id, season.id)
             if prediction_status and prediction_status.locked_at:
                 submission_label = "Prediction locked"
@@ -610,6 +794,7 @@ def create_app(
                     )
                     if prediction_status and prediction_status.locked_at
                     else None,
+                    bulletin_card(latest_bulletin) if latest_bulletin else None,
                     Div(
                         H2("Season teams"),
                         Ul(
@@ -1125,6 +1310,8 @@ def create_app(
                     title="Leaderboard · Season27",
                 )
             entries = build_leaderboard(session, season.id, snapshot)
+            published_bulletins = get_published_bulletins(session, season.id)
+            latest_bulletin = published_bulletins[0] if published_bulletins else None
             state_label = "Final" if snapshot.is_final else "As it stands"
             return page(
                 Main(
@@ -1141,6 +1328,7 @@ def create_app(
                     P(state_label, cls="result-state"),
                     P(f"Standings recorded: {format_time(snapshot.recorded_at)}"),
                     P(f"Last checked: {format_time(snapshot.refreshed_at)}"),
+                    bulletin_card(latest_bulletin) if latest_bulletin else None,
                     Form(
                         Input(type="hidden", name="csrf_token", value=app_session.csrf_token),
                         Button("Refresh standings", type="submit", cls="save-button"),
@@ -1456,6 +1644,72 @@ def create_app(
         response.delete_cookie(SESSION_COOKIE)
         return response
 
+    @app.get("/bulletins")
+    def bulletin_archive(request: Request) -> Response:
+        if current_session(request) is None:
+            return redirect_to_login()
+        with sessions() as session:
+            season = get_current_season(session)
+            if season is None:
+                return HTMLResponse("No season configured", status_code=409)
+            bulletins = get_published_bulletins(session, season.id)
+        return page(
+            Main(
+                A("← Back to dashboard", href="/"),
+                H1(BULLETIN_TITLE),
+                P("Every published edition, newest first."),
+                *(
+                    Div(
+                        H2(A(item.title, href=f"/bulletins/{item.slug}")),
+                        P(item.body),
+                        P(
+                            format_time(item.published_at)
+                            if item.published_at
+                            else "Published",
+                            cls="bulletin-date",
+                        ),
+                        cls="section-card bulletin-archive-item",
+                    )
+                    for item in bulletins
+                ),
+                P("No bulletins have been published yet.", cls="notice")
+                if not bulletins
+                else None,
+                cls="container",
+            ),
+            title=f"{BULLETIN_TITLE} · Season27",
+        )
+
+    @app.get("/bulletins/{slug}")
+    def bulletin_detail(request: Request, slug: str) -> Response:
+        if current_session(request) is None:
+            return redirect_to_login()
+        with sessions() as session:
+            bulletin = session.scalar(
+                select(Bulletin).where(
+                    Bulletin.slug == slug,
+                    Bulletin.status == "published",
+                )
+            )
+        if bulletin is None:
+            return HTMLResponse("Bulletin not found", status_code=404)
+        return page(
+            Main(
+                A("← All bulletins", href="/bulletins"),
+                P(BULLETIN_TITLE, cls="bulletin-kicker"),
+                H1(bulletin.title),
+                P(bulletin.body, cls="bulletin-body bulletin-detail-body"),
+                P(
+                    f"Published {format_time(bulletin.published_at)}"
+                    if bulletin.published_at
+                    else "Published",
+                    cls="bulletin-date",
+                ),
+                cls="container bulletin-detail",
+            ),
+            title=f"{bulletin.title} · Season27",
+        )
+
     @app.get("/admin")
     def admin(request: Request) -> Response:
         app_session = current_session(request)
@@ -1571,6 +1825,7 @@ def create_app(
                 ),
                 Div(
                     H2("Records and operations"),
+                    A("Manage bulletins", href="/admin/bulletins"),
                     A("Audit history", href="/admin/audit"),
                     A("Exports", href="/admin/exports", cls="card-link"),
                     A("Operational health", href="/admin/health", cls="card-link"),
@@ -1592,6 +1847,303 @@ def create_app(
     def admin_csrf(form: object, app_session: AppSession) -> bool:
         value = form.get("csrf_token", "")  # type: ignore[attr-defined]
         return hmac.compare_digest(str(value), app_session.csrf_token)
+
+    def bulletin_fact_list(fact_pack: dict[str, object]) -> tuple[Ul, Ul]:
+        raw_matches = fact_pack.get("matches", [])
+        raw_impacts = fact_pack.get("period_player_impacts", [])
+        matches = raw_matches if isinstance(raw_matches, (list, tuple)) else []
+        impacts = raw_impacts if isinstance(raw_impacts, (list, tuple)) else []
+        return (
+            Ul(
+                *(
+                    Li(
+                        f"{item.get('home_team', 'Unknown')} "
+                        f"{item.get('home_score', '?')}–{item.get('away_score', '?')} "
+                        f"{item.get('away_team', 'Unknown')} "
+                        f"({item.get('evidence', 'period_context_only')})"
+                    )
+                    for item in matches
+                    if isinstance(item, dict)
+                )
+            ),
+            Ul(
+                *(
+                    Li(
+                        f"{item.get('display_name', 'Unknown')}: "
+                        f"rank {item.get('previous_rank', '?')} → "
+                        f"{item.get('current_rank', '?')}; "
+                        f"score {item.get('previous_score', '?')} → "
+                        f"{item.get('current_score', '?')}"
+                    )
+                    for item in impacts
+                    if isinstance(item, dict)
+                )
+            ),
+        )
+
+    def admin_bulletin_preview(bulletin: Bulletin, csrf_token: str) -> Response:
+        match_facts, impact_facts = bulletin_fact_list(bulletin.fact_pack)
+        return page(
+            Main(
+                A("← Back to bulletins", href="/admin/bulletins"),
+                H1("Bulletin preview"),
+                P(f"Status: {bulletin.status.title()}", cls="result-state"),
+                Div(
+                    P(BULLETIN_TITLE, cls="bulletin-kicker"),
+                    H2(bulletin.title),
+                    P(bulletin.body, cls="bulletin-body"),
+                    P(
+                        f"Reporting period: {format_time(bulletin.period_start)} – "
+                        f"{format_time(bulletin.period_end)}",
+                        cls="bulletin-date",
+                    ),
+                    cls="bulletin-card bulletin-preview",
+                ),
+                Div(
+                    H2("Edit copy"),
+                    Form(
+                        Input(type="hidden", name="csrf_token", value=csrf_token),
+                        Label("Bulletin text", fr="bulletin-body"),
+                        Textarea(
+                            bulletin.body,
+                            id="bulletin-body",
+                            name="body",
+                            rows="7",
+                            minlength="15",
+                            required=True,
+                        ),
+                        Button("Save changes", type="submit", cls="save-button"),
+                        method="post",
+                        action=f"/admin/bulletins/{bulletin.id}/update",
+                        cls="admin-form bulletin-editor",
+                    ),
+                    cls="section-card",
+                ),
+                Div(
+                    H2("Publication"),
+                    Form(
+                        Input(type="hidden", name="csrf_token", value=csrf_token),
+                        Button(
+                            "Republish" if bulletin.status == "suppressed" else "Publish",
+                            type="submit",
+                            cls="save-button",
+                        ),
+                        method="post",
+                        action=f"/admin/bulletins/{bulletin.id}/publish",
+                        cls="inline-admin-form",
+                    )
+                    if bulletin.status in {"draft", "suppressed"}
+                    else None,
+                    Form(
+                        Input(type="hidden", name="csrf_token", value=csrf_token),
+                        Button("Suppress bulletin", type="submit"),
+                        method="post",
+                        action=f"/admin/bulletins/{bulletin.id}/suppress",
+                        cls="inline-admin-form",
+                    )
+                    if bulletin.status == "published"
+                    else None,
+                    A(
+                        "View published edition",
+                        href=f"/bulletins/{bulletin.slug}",
+                        cls="card-link",
+                    )
+                    if bulletin.status == "published"
+                    else None,
+                    cls="section-card",
+                ),
+                Div(
+                    H2("Verified source matches"),
+                    match_facts,
+                    H2("Leaderboard changes"),
+                    impact_facts,
+                    cls="section-card bulletin-facts",
+                ),
+                cls="container wide-container",
+            ),
+            title="Bulletin preview · Season27",
+        )
+
+    @app.get("/admin/bulletins")
+    def admin_bulletins(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        now = clock()
+        with sessions() as session:
+            bulletins = list(
+                session.scalars(select(Bulletin).order_by(Bulletin.period_end.desc()))
+            )
+        period_end = now.strftime("%Y-%m-%dT%H:%M")
+        period_start = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M")
+        return page(
+            Main(
+                A("← Back to administration", href="/admin"),
+                H1(BULLETIN_TITLE),
+                Div(
+                    H2("Prepare an edition"),
+                    P(
+                        "The preview is built from stored match results and standings snapshots. "
+                        "Nothing is public until Publish is selected."
+                    ),
+                    Form(
+                        Input(
+                            type="hidden",
+                            name="csrf_token",
+                            value=app_session.csrf_token,
+                        ),
+                        Label("Period start", fr="period-start"),
+                        Input(
+                            type="datetime-local",
+                            id="period-start",
+                            name="period_start",
+                            value=period_start,
+                            required=True,
+                        ),
+                        Label("Period end", fr="period-end"),
+                        Input(
+                            type="datetime-local",
+                            id="period-end",
+                            name="period_end",
+                            value=period_end,
+                            required=True,
+                        ),
+                        Label("Bulletin text", fr="new-bulletin-body"),
+                        Textarea(
+                            id="new-bulletin-body",
+                            name="body",
+                            rows="7",
+                            minlength="15",
+                            maxlength="1200",
+                            required=True,
+                            placeholder=(
+                                "A short, sharp and factual dose of Monday morning banter."
+                            ),
+                        ),
+                        Button("Build preview", type="submit", cls="save-button"),
+                        method="post",
+                        action="/admin/bulletins/preview",
+                        cls="admin-form bulletin-editor",
+                    ),
+                    cls="section-card",
+                ),
+                Div(
+                    H2("Editions"),
+                    *(
+                        Div(
+                            A(item.title, href=f"/admin/bulletins/{item.id}"),
+                            Span(item.status.title(), cls=f"bulletin-status {item.status}"),
+                            Small(format_time(item.period_end)),
+                            cls="admin-summary-row",
+                        )
+                        for item in bulletins
+                    ),
+                    P("No bulletin drafts yet.") if not bulletins else None,
+                    cls="section-card",
+                ),
+                cls="container wide-container",
+            ),
+            title=f"{BULLETIN_TITLE} · Administration",
+        )
+
+    @app.post("/admin/bulletins/preview")
+    async def admin_bulletin_create_preview(request: Request) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            period_start = parse_local_datetime(form.get("period_start"))
+            period_end = parse_local_datetime(form.get("period_end"))
+            with sessions() as session:
+                season = get_current_season(session)
+                if season is None:
+                    return HTMLResponse("No season configured", status_code=409)
+                pack = build_fact_pack(session, season.id, period_start, period_end)
+                bulletin = save_bulletin_draft(
+                    session,
+                    pack,
+                    str(form.get("body", "")),
+                    app_session.player_id,
+                    clock(),
+                )
+                bulletin_id = bulletin.id
+        except (FactPackError, InvalidBulletin) as error:
+            return HTMLResponse(str(error), status_code=422)
+        return RedirectResponse(f"/admin/bulletins/{bulletin_id}", status_code=303)
+
+    @app.get("/admin/bulletins/{bulletin_id}")
+    def admin_bulletin_detail(request: Request, bulletin_id: int) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        with sessions() as session:
+            bulletin = session.get(Bulletin, bulletin_id)
+            if bulletin is None:
+                return HTMLResponse("Bulletin not found", status_code=404)
+            return admin_bulletin_preview(bulletin, app_session.csrf_token)
+
+    @app.post("/admin/bulletins/{bulletin_id}/update")
+    async def admin_bulletin_update(request: Request, bulletin_id: int) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            with sessions() as session:
+                bulletin = session.get(Bulletin, bulletin_id)
+                if bulletin is None:
+                    return HTMLResponse("Bulletin not found", status_code=404)
+                update_bulletin(
+                    session,
+                    bulletin,
+                    str(form.get("body", "")),
+                    app_session.player_id,
+                    clock(),
+                )
+        except InvalidBulletin as error:
+            return HTMLResponse(str(error), status_code=422)
+        return RedirectResponse(f"/admin/bulletins/{bulletin_id}", status_code=303)
+
+    @app.post("/admin/bulletins/{bulletin_id}/publish")
+    async def admin_bulletin_publish(request: Request, bulletin_id: int) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            with sessions() as session:
+                bulletin = session.get(Bulletin, bulletin_id)
+                if bulletin is None:
+                    return HTMLResponse("Bulletin not found", status_code=404)
+                publish_bulletin(session, bulletin, app_session.player_id, clock())
+        except InvalidBulletin as error:
+            return HTMLResponse(str(error), status_code=422)
+        return RedirectResponse(f"/admin/bulletins/{bulletin_id}", status_code=303)
+
+    @app.post("/admin/bulletins/{bulletin_id}/suppress")
+    async def admin_bulletin_suppress(request: Request, bulletin_id: int) -> Response:
+        app_session, denied = admin_access(request)
+        if denied or app_session is None:
+            return denied or redirect_to_login()
+        form = await request.form()
+        if not admin_csrf(form, app_session):
+            return HTMLResponse("Request rejected", status_code=403)
+        try:
+            with sessions() as session:
+                bulletin = session.get(Bulletin, bulletin_id)
+                if bulletin is None:
+                    return HTMLResponse("Bulletin not found", status_code=404)
+                suppress_bulletin(session, bulletin, app_session.player_id, clock())
+        except InvalidBulletin as error:
+            return HTMLResponse(str(error), status_code=422)
+        return RedirectResponse(f"/admin/bulletins/{bulletin_id}", status_code=303)
 
     def parse_order(form: object) -> list[int]:
         try:

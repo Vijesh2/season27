@@ -18,3 +18,7 @@ For each phase, have all five participants sign in on their intended phone/brows
 ordering and submission, the deadline lock, each swap window, leaderboard updates, a stale standings
 failure, admin correction/audit/export, session revocation, and recovery from a redeploy. Record
 browser/device, outcome, and follow-up owner. Delete the time override before any production deploy.
+
+Before enabling the Monday schedule, perform the bulletin dry run in staging described in
+[BULLETIN_AUTOMATION.md](BULLETIN_AUTOMATION.md). Publish one supervised edition, verify it in the
+authenticated archive, suppress it, and confirm an automation retry refuses to restore it.

@@ -55,3 +55,8 @@ codes, revoke device sessions, adjust pre-lock dates, perform reasoned exception
 reinstate excluded players, inspect audit history, and export season data. Newly generated login
 codes are shown once, are never written to logs or exports, and revoke that player's existing
 sessions immediately.
+
+The weekly Codex workflow for **The Monday Morning Banter Bulletin** is documented in
+[docs/BULLETIN_AUTOMATION.md](docs/BULLETIN_AUTOMATION.md). It refreshes BBC results and standings,
+generates copy only from a signed fact-pack digest, publishes idempotently, and verifies the saved
+edition.

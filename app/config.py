@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     standings_refresh_throttle_seconds: int = 60
     standings_connect_timeout_seconds: float = 3.0
     standings_read_timeout_seconds: float = 8.0
+    results_url: str = "https://www.bbc.co.uk/sport/football/scores-fixtures"
+    results_connect_timeout_seconds: float = 3.0
+    results_read_timeout_seconds: float = 12.0
+    results_retry_attempts: int = 2
+    bulletin_automation_token: SecretStr | None = None
+    bulletin_automation_actor_name: str | None = None
+    public_base_url: str | None = None
     static_dir: Path = Path(__file__).parent / "static"
 
     @property
@@ -54,4 +61,13 @@ class Settings(BaseSettings):
                 )
         if bool(self.bootstrap_admin_name) != bool(self.bootstrap_admin_code):
             raise ValueError("bootstrap administrator name and code must be supplied together")
+        if self.bulletin_automation_token is not None:
+            if len(self.bulletin_automation_token.get_secret_value()) < 32:
+                raise ValueError(
+                    "SEASON27_BULLETIN_AUTOMATION_TOKEN must be at least 32 characters"
+                )
+            if not self.bulletin_automation_actor_name:
+                raise ValueError(
+                    "SEASON27_BULLETIN_AUTOMATION_ACTOR_NAME is required with the token"
+                )
         return self

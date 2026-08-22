@@ -18,6 +18,12 @@ store.
 5. Keep the service at one replica and verify login, static assets, database persistence after a
    redeploy, standings refresh, and an export before inviting players.
 
+For bulletin automation, also set `SEASON27_BULLETIN_AUTOMATION_TOKEN` to an independently generated
+secret of at least 32 characters and `SEASON27_BULLETIN_AUTOMATION_ACTOR_NAME` to the exact display
+name of an active administrator. Set `SEASON27_PUBLIC_BASE_URL` in the machine running Codex (not
+necessarily in Railway) to the public HTTPS origin. Use the same automation token in both places.
+Do not reuse the application secret key or a player's login code.
+
 Never put player identities or codes in repository files, build arguments, command output, or logs.
 After first login, add participants through **Admin → Players and login codes → Add participant**.
 Each initial code is shown once and only its secure hash is stored. Rotate the administrator code,

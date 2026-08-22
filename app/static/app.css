@@ -130,6 +130,21 @@ a { color: #27683d; }
 .participant-status-scroll { overflow-x: auto; }
 .participant-status-table { margin: .75rem 0 0; }
 .participant-status-table th:first-child, .participant-status-table td:first-child { text-align: left; }
+.bulletin-card { background: linear-gradient(135deg, #173f28, #27683d); border-radius: 1rem; color: white; margin: 1.5rem 0; padding: 1.4rem; }
+.bulletin-card a { color: white; }
+.bulletin-card h2 { margin: .15rem 0 .7rem; }
+.bulletin-kicker { font-size: .75rem; font-weight: 900; letter-spacing: .09em; margin: 0; text-transform: uppercase; }
+.bulletin-body { font-size: 1.05rem; line-height: 1.65; white-space: pre-line; }
+.bulletin-date { font-size: .82rem; opacity: .8; }
+.bulletin-archive-link { display: inline-block; font-weight: 800; margin-top: .3rem; }
+.bulletin-detail-body { font-size: 1.2rem; }
+.bulletin-editor textarea { border: 1px solid #aab9ae; border-radius: .4rem; font: inherit; line-height: 1.5; padding: .7rem; resize: vertical; width: 100%; }
+.bulletin-preview { margin-top: 1rem; }
+.bulletin-facts li { margin: .4rem 0; }
+.bulletin-status { border-radius: 999px; font-size: .75rem; font-weight: 850; padding: .25rem .55rem; text-transform: uppercase; }
+.bulletin-status.draft { background: #fff3c4; color: #654f00; }
+.bulletin-status.published { background: #dff3e4; color: #173f28; }
+.bulletin-status.suppressed { background: #f4dddd; color: #762525; }
 
 @media (max-width: 600px) {
   .results-table { font-size: .85rem; }

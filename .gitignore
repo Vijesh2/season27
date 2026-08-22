@@ -17,3 +17,4 @@ playwright-report/
 test-results/
 .env
 .sesskey
+.season27-automation/
