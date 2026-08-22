@@ -1,20 +1,33 @@
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any, cast
 
 import requests
+from pydantic import SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class AutomationError(RuntimeError):
     pass
 
 
+class AutomationSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="SEASON27_", env_file=".env")
+
+    public_base_url: str = ""
+    bulletin_automation_token: SecretStr | None = None
+
+
 def _configuration(args: argparse.Namespace) -> tuple[str, str]:
-    base_url = (args.base_url or os.environ.get("SEASON27_PUBLIC_BASE_URL", "")).rstrip("/")
-    token = args.token or os.environ.get("SEASON27_BULLETIN_AUTOMATION_TOKEN", "")
+    settings = AutomationSettings()
+    base_url = (args.base_url or settings.public_base_url).rstrip("/")
+    token = args.token or (
+        settings.bulletin_automation_token.get_secret_value()
+        if settings.bulletin_automation_token
+        else ""
+    )
     if not base_url or not token:
         raise AutomationError(
             "Set SEASON27_PUBLIC_BASE_URL and SEASON27_BULLETIN_AUTOMATION_TOKEN."
