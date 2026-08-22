@@ -756,6 +756,7 @@ def create_app(
                         A("Leaderboard", href="/leaderboard")
                         if prediction_status and prediction_status.locked_at
                         else None,
+                        A("Bulletin archive", href="/bulletins"),
                         admin_link,
                         Form(
                             Input(type="hidden", name="csrf_token", value=app_session.csrf_token),

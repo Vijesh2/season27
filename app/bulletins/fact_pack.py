@@ -112,7 +112,7 @@ def _choose_snapshots(
             for item in reversed(snapshots)
             if _utc(item.recorded_at, timezone) <= period_start.astimezone(UTC)
         ),
-        None,
+        snapshots[0] if snapshots else None,
     )
     current = by_id.get(current_snapshot_id) if current_snapshot_id is not None else next(
         (
@@ -313,6 +313,20 @@ def build_fact_pack(
         ),
         verified_match_impacts=verified,
         claim_rules=(
+            "Exact scorelines may be quoted from matches.",
+            "Only verified_match_impacts may be described as causing a leaderboard change.",
+            "Other matches are period context and must not be assigned individual causation.",
+            "Period changes may include listed prediction swaps or corrections.",
+            "Player ranks and scores must be quoted exactly as supplied.",
+        )
+        + (
+            (
+                "Leaderboard movement before the baseline snapshot was recorded was not measured "
+                "and must not be claimed."
+            ),
+        )
+        if _utc(baseline.recorded_at, timezone) > period_start.astimezone(UTC)
+        else (
             "Exact scorelines may be quoted from matches.",
             "Only verified_match_impacts may be described as causing a leaderboard change.",
             "Other matches are period context and must not be assigned individual causation.",

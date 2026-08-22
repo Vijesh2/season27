@@ -287,7 +287,7 @@ def test_tied_players_remain_tied_and_unchanged_players_are_included(tmp_path: P
 
 
 def test_fact_pack_requires_valid_period_and_allows_a_quiet_week(tmp_path: Path) -> None:
-    session, season_id, _team_ids, before_id, _after_id = prepared_database(
+    session, season_id, _team_ids, before_id, after_id = prepared_database(
         tmp_path / "missing.db"
     )
     with session:
@@ -304,3 +304,13 @@ def test_fact_pack_requires_valid_period_and_allows_a_quiet_week(tmp_path: Path)
         )
         assert pack.baseline_snapshot == pack.current_snapshot
         assert all(item.score_change == 0 for item in pack.period_player_impacts)
+
+        inaugural = build_fact_pack(
+            session,
+            season_id,
+            datetime(2026, 8, 17, tzinfo=UTC),
+            instant.replace(hour=13),
+        )
+        assert inaugural.baseline_snapshot.id == before_id
+        assert inaugural.current_snapshot.id == after_id
+        assert any("before the baseline" in rule for rule in inaugural.claim_rules)
